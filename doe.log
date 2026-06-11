@@ -1,0 +1,359 @@
+남은 설계 120개 (완료 9 스킵)
+1/120 25s ok
+Error:  Out of memory.
+Process ForkProcess-2:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+Error:  Out of memory.
+Process ForkProcess-3:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+Error:  Out of memory.
+Process ForkProcess-5:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+6/120 25s ok
+Error:  Out of memory.
+Process ForkProcess-7:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+11/120 23s ok
+16/120 24s ok
+Error:  Out of memory.
+Process ForkProcess-17:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+21/120 26s ok
+26/120 26s ok
+Error:  Out of memory.
+Process ForkProcess-29:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+31/120 0s fail: AssertionError: 외측 링 노드 
+Error:  Out of memory.
+Process ForkProcess-34:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+Error:  Out of memory.
+Process ForkProcess-36:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+36/120 17s fail: crashed(exit 1)
+Error:  Out of memory.
+Process ForkProcess-39:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+41/120 24s ok
+Error:  Out of memory.
+Process ForkProcess-44:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+Error:  Out of memory.
+Process ForkProcess-46:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+46/120 11s fail: crashed(exit 1)
+Error:  Out of memory.
+Process ForkProcess-50:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+51/120 21s ok
+Error:  Out of memory.
+Process ForkProcess-53:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+Error:  Out of memory.
+Process ForkProcess-54:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+56/120 13s fail: ValueError: 메시 폭주: 55699
+Error:  Out of memory.
+Process ForkProcess-57:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+Error:  Out of memory.
+Process ForkProcess-59:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+61/120 28s ok
+66/120 21s ok
+71/120 27s ok
+76/120 21s ok
+81/120 24s ok
+Error:  Out of memory.
+Process ForkProcess-84:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+86/120 29s ok
+91/120 22s ok
+Error:  Out of memory.
+Process ForkProcess-93:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+Error:  Out of memory.
+Process ForkProcess-95:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+96/120 22s ok
+Error:  Out of memory.
+Process ForkProcess-98:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+101/120 22s ok
+Error:  Out of memory.
+Process ForkProcess-103:
+Traceback (most recent call last):
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 314, in _bootstrap
+    self.run()
+  File "/usr/lib/python3.12/multiprocessing/process.py", line 108, in run
+    self._target(*self._args, **self._kwargs)
+  File "/home/claude/motoropt/scripts/run_p5_doe.py", line 28, in child
+    q.put(_eval(x))
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 94, in put
+    self._start_thread()
+  File "/usr/lib/python3.12/multiprocessing/queues.py", line 192, in _start_thread
+    self._thread.start()
+  File "/usr/lib/python3.12/threading.py", line 992, in start
+    _start_new_thread(self._bootstrap, ())
+RuntimeError: can't start new thread
+106/120 25s ok

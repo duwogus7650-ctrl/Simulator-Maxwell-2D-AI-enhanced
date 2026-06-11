@@ -73,11 +73,20 @@ def _circle_from_grid(r: float, grid: np.ndarray) -> Polygon:
 def _circle3pt_arc(p1, p2, p3, n=40):
     ax, ay = p1; bx, by = p2; cx, cy = p3
     d = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by))
+    span = math.hypot(cx - ax, cy - ay)
+    if abs(d) < 1e-9 * max(span, 1.0) ** 2:      # 퇴화(일직선) → 직선
+        t = np.linspace(0, 1, n)[:, None]
+        pts = (1 - t) * np.array([[ax, ay]]) + t * np.array([[cx, cy]])
+        return [tuple(p) for p in pts]
     ux = ((ax**2 + ay**2) * (by - cy) + (bx**2 + by**2) * (cy - ay)
           + (cx**2 + cy**2) * (ay - by)) / d
     uy = ((ax**2 + ay**2) * (cx - bx) + (bx**2 + by**2) * (ax - cx)
           + (cx**2 + cy**2) * (bx - ax)) / d
     r = math.hypot(ax - ux, ay - uy)
+    if r > 50 * max(span, 1e-9):                  # 준일직선 → 직선
+        t = np.linspace(0, 1, n)[:, None]
+        pts = (1 - t) * np.array([[ax, ay]]) + t * np.array([[cx, cy]])
+        return [tuple(p) for p in pts]
     aa = math.atan2(ay - uy, ax - ux)
     cc = math.atan2(cy - uy, cx - ux)
     # 짧은 호(중간점 경유) 선택

@@ -96,6 +96,8 @@ def _mesh_side(lines, geo, h, inner: bool, min_angle=25.0):
     if not inner:                       # r_o 원 내부는 외측 도메인이 아님
         pslg["holes"] = np.asarray([[0.0, 0.0]])
     mesh = tr.triangulate(pslg, f"pq{min_angle}Aa")
+    if len(mesh["triangles"]) > 600_000:
+        raise ValueError(f"메시 폭주: {len(mesh['triangles'])} 요소")
     mesh["region_table"] = table
     return mesh
 
