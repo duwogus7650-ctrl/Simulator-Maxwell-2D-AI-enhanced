@@ -58,7 +58,8 @@ class Magnetostatic2D:
         self.centroid = np.stack([x.mean(1), y.mean(1)], axis=1)
 
         # ---- 재질 배치 ------------------------------------------------
-        self.steel = NuCurve(materials[steel_name]["bh_curve"])
+        self.steel = NuCurve(materials[steel_name]["bh_curve"],
+                             materials[steel_name].get("stacking_factor", 1.0))
         self.pm = PMLinear(materials[magnet_name]["bh_curve"])
         self.is_steel = np.isin(self.kind, ("rotor", "stator"))
         self.is_magnet = self.kind == "magnet"

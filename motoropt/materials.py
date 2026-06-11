@@ -20,9 +20,13 @@ class NuCurve:
     테이블 범위를 넘으면 dB/dH = μ0 기울기로 외삽한다.
     """
 
-    def __init__(self, bh: list[list[float]]):
+    def __init__(self, bh: list[list[float]], stacking_factor: float = 1.0):
         arr = np.asarray(bh, float)
         arr = arr[arr[:, 1] >= 0]          # B>=0 분기만 사용
+        if stacking_factor < 1.0:           # 적층(z) 유효 BH 변환
+            ks = stacking_factor
+            arr = arr.copy()
+            arr[:, 1] = ks * arr[:, 1] + (1 - ks) * MU0 * arr[:, 0]
         # B 단조 증가 보장
         order = np.argsort(arr[:, 1])
         B, H = arr[order, 1], arr[order, 0]
