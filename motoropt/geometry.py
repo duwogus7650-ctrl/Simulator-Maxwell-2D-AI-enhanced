@@ -174,7 +174,8 @@ def _build_magnet(phi: float, grid_ri: np.ndarray, v: dict,
     return poly
 
 
-def build_motor(v_si: Dict[str, float], magnet_style: str = "spline") -> MotorGeometry:
+def build_motor(v_si: Dict[str, float], magnet_style: str = "spline",
+                rotor_angle_deg: float = 0.0) -> MotorGeometry:
     mm_keys = ("D_ro", "T_m", "D_shaft", "D_so", "T_Yoke", "g", "D_si",
                "W_t", "d_1", "d_2", "H_t", "W_so", "MagnetR", "T_m2",
                "Magnet_R_Offset", "L_stk")
@@ -193,8 +194,9 @@ def build_motor(v_si: Dict[str, float], magnet_style: str = "spline") -> MotorGe
     th_ss, th_ss2, th_st = v["theta_ss"], v["theta_ss2"], v["theta_st"]
 
     # ---- 공유 인터페이스 각도 그리드 -------------------------------
+    rot0 = math.radians(rotor_angle_deg)
     mag_centers = [math.pi / 2 + math.pi / n_pole + 2 * math.pi / n_pole * k
-                   for k in range(n_pole)]
+                   + rot0 for k in range(n_pole)]
     grid_ri = _grid_angles(
         [c + s * th1 for c in mag_centers for s in (-1, 1)], 720)
     tooth_centers = [2 * math.pi / n_slot * k for k in range(n_slot)]
