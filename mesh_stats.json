@@ -1,0 +1,14 @@
+{
+ "nodes": 17315,
+ "elements": 34305,
+ "by_region": {
+  "rotor": 4192,
+  "magnet": 4540,
+  "air_shaft": 686,
+  "stator": 7143,
+  "air_gap_out": 6921,
+  "coil": 5329,
+  "air_gap_in": 4866,
+  "air_outer": 628
+ }
+}

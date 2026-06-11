@@ -1,0 +1,5 @@
+numpy
+scipy
+shapely>=2.0
+triangle
+matplotlib

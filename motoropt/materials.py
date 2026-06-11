@@ -1,0 +1,78 @@
+"""재질 자기 모델.
+
+- NuCurve : 비선형 BH 테이블 → ν(B²)=H/B 와 dν/dB² (Newton-Raphson용)
+- PMLinear: 영구자석 데마그 곡선 → 선형 리코일 모델 (Br, μ_rec)
+"""
+from __future__ import annotations
+
+import numpy as np
+from scipy.interpolate import PchipInterpolator
+
+MU0 = 4e-7 * np.pi
+NU0 = 1.0 / MU0
+
+
+class NuCurve:
+    """비선형 연자성체의 ν(B²) 모델.
+
+    BH 테이블(H[A/m], B[T])을 PCHIP 보간한 H(B)에서
+    ν = H/B, dν/dB² = (H'B - H) / (2B³) 를 계산한다.
+    테이블 범위를 넘으면 dB/dH = μ0 기울기로 외삽한다.
+    """
+
+    def __init__(self, bh: list[list[float]]):
+        arr = np.asarray(bh, float)
+        arr = arr[arr[:, 1] >= 0]          # B>=0 분기만 사용
+        # B 단조 증가 보장
+        order = np.argsort(arr[:, 1])
+        B, H = arr[order, 1], arr[order, 0]
+        keep = np.concatenate([[True], np.diff(B) > 1e-12])
+        self.B, self.H = B[keep], H[keep]
+        self._h_of_b = PchipInterpolator(self.B, self.H, extrapolate=False)
+        self._dh_db = self._h_of_b.derivative()
+        self.B_max = self.B[-1]
+        self.H_max = self.H[-1]
+        # 초기 투자율 (B→0 극한): ν0 = dH/dB(0)
+        self.nu_init = float(self._dh_db(self.B[1] * 0.5))
+
+    def nu_and_dnu(self, b2: np.ndarray):
+        """b2 = |B|² 배열 → (ν, dν/dB²)."""
+        b2 = np.maximum(b2, 0.0)
+        B = np.sqrt(b2)
+        nu = np.full_like(B, self.nu_init)
+        dnu = np.zeros_like(B)
+
+        small = B < self.B[1] * 0.5
+        inside = (~small) & (B <= self.B_max)
+        beyond = B > self.B_max
+
+        if inside.any():
+            Bi = B[inside]
+            Hi = self._h_of_b(Bi)
+            dHi = self._dh_db(Bi)
+            nu[inside] = Hi / Bi
+            dnu[inside] = (dHi * Bi - Hi) / (2.0 * Bi ** 3)
+        if beyond.any():
+            Bb = B[beyond]
+            Hb = self.H_max + (Bb - self.B_max) * NU0
+            nu[beyond] = Hb / Bb
+            dnu[beyond] = (NU0 * Bb - Hb) / (2.0 * Bb ** 3)
+        return nu, dnu
+
+
+class PMLinear:
+    """영구자석 선형 리코일: B = μ0·μ_rec·H + Br."""
+
+    def __init__(self, bh: list[list[float]] | None = None,
+                 br: float | None = None, mu_rec: float | None = None):
+        if bh is not None:
+            arr = np.asarray(bh, float)
+            i0 = int(np.argmin(np.abs(arr[:, 0])))      # H=0 근방
+            self.Br = float(arr[i0, 1])
+            i1 = max(i0 - 4, 0)
+            dB = arr[i0, 1] - arr[i1, 1]
+            dH = arr[i0, 0] - arr[i1, 0]
+            self.mu_rec = float(dB / dH / MU0)
+        else:
+            self.Br, self.mu_rec = br, mu_rec
+        self.nu = 1.0 / (MU0 * self.mu_rec)

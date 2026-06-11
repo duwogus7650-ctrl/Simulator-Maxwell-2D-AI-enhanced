@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.npy
+*.aedt
+*.aedtresults/
+.DS_Store

@@ -1,0 +1,211 @@
+{
+ "설계명": "4. 400W_BasicModel_Load_Optimized",
+ "자석_작도_스타일": "spline",
+ "변수_원식": {
+  "D_ro": "62mm",
+  "T_m": "2.2mm",
+  "D_shaft": "30mm",
+  "N_pole": "16",
+  "a_m": "0.89",
+  "theta_one": "180deg/N_pole*a_m",
+  "Magnet_R_Offset": "11mm",
+  "theta_two": "asin((D_ro/2-T_m)*sin(theta_one)/(D_ro/2-Magnet_R_Offset))",
+  "D_so": "82.3mm",
+  "T_Yoke": "2mm",
+  "g": "0.5mm",
+  "D_si": "D_ro+2*g",
+  "W_t": "3.5mm",
+  "d_1": "0.5mm",
+  "d_2": "0.5mm",
+  "H_t": "(D_so/2-T_Yoke)-(D_si/2+d_1+d_2)",
+  "N_slot": "18",
+  "W_so": "0.56mm",
+  "theta_so2": "2*asin(W_so/(2*(D_si/2+d_1)))",
+  "theta_ss2": "360deg/N_slot-theta_so2",
+  "theta_so": "2*asin(W_so/(2*(D_si/2)))",
+  "theta_ss": "360deg/N_slot-theta_so",
+  "theta_st": "2*asin(W_t/(2*(D_si/2+d_1+d_2)))",
+  "Zc": "15",
+  "Ia_max": "I_rms*sqrt(2)",
+  "BaseRPM": "4500rpm",
+  "omega": "2*PI*BaseRPM/60RPM*N_pole/2",
+  "beta": "0deg",
+  "a": "1",
+  "ini_pos": "-12.4deg",
+  "stop_time": "120RPM/(BaseRPM*N_pole)",
+  "time_step": "stop_time/36",
+  "MagnetR": "0.8mm",
+  "L_stk": "20*0.93mm",
+  "I_rms": "4.9A",
+  "T_m2": "2.02mm",
+  "K": "D_ro/D_so"
+ },
+ "변수_해석값_SI": {
+  "D_ro": 0.062,
+  "T_m": 0.0022,
+  "D_shaft": 0.03,
+  "N_pole": 16.0,
+  "a_m": 0.89,
+  "theta_one": 0.17475109135593225,
+  "Magnet_R_Offset": 0.011,
+  "theta_two": 0.25305492643878597,
+  "D_so": 0.0823,
+  "T_Yoke": 0.002,
+  "g": 0.0005,
+  "D_si": 0.063,
+  "W_t": 0.0035,
+  "d_1": 0.0005,
+  "d_2": 0.0005,
+  "H_t": 0.006649999999999996,
+  "N_slot": 18.0,
+  "W_so": 0.0005600000000000001,
+  "theta_so2": 0.017500223314985654,
+  "theta_ss2": 0.33156562708388027,
+  "theta_so": 0.01777801189675597,
+  "theta_ss": 0.3312878385021099,
+  "theta_st": 0.10774441637043686,
+  "Zc": 15.0,
+  "BaseRPM": 4500.0,
+  "omega": 3769.911184307752,
+  "beta": 0.0,
+  "a": 1.0,
+  "ini_pos": -0.21642082724729686,
+  "stop_time": 0.0016666666666666668,
+  "time_step": 4.62962962962963e-05,
+  "MagnetR": 0.0008,
+  "L_stk": 0.018600000000000002,
+  "I_rms": 4.9,
+  "T_m2": 0.00202,
+  "K": 0.7533414337788579,
+  "Ia_max": 6.929646455628166
+ },
+ "재질": {
+  "20PNX1200F_20C": {
+   "name": "20PNX1200F_20C",
+   "bh_curve": "82점",
+   "permeability": "nonlinear",
+   "conductivity_S_per_m": 1818181.81818182,
+   "mass_density_kg_per_m3": 7650.0,
+   "core_loss_kh": 111.924071487,
+   "core_loss_kc": 0.119631568498053,
+   "core_loss_ke": 2.82804888645,
+   "stacking_factor": 0.97
+  },
+  "Arnold_Magnetics_N45UH_80C": {
+   "name": "Arnold_Magnetics_N45UH_80C",
+   "bh_curve": "87점",
+   "permeability": "nonlinear",
+   "coercivity_A_per_m": -1047400.0,
+   "coercivity_dir": [
+    1.0,
+    0.0,
+    0.0
+   ],
+   "conductivity_S_per_m": 555555.5556,
+   "mass_density_kg_per_m3": 7500.0
+  },
+  "Copper (Pure)_80C": {
+   "name": "Copper (Pure)_80C",
+   "permeability": 1.0,
+   "conductivity_S_per_m": 47092391.429245,
+   "mass_density_kg_per_m3": 8933.0
+  },
+  "vacuum": {
+   "name": "vacuum",
+   "permeability": 1.0
+  }
+ },
+ "권선": {
+  "Phase_A": {
+   "id": 12,
+   "type": "Current",
+   "current_expr": "Ia_max*sin(omega*time)",
+   "parallel_branches": "a",
+   "is_solid": false
+  },
+  "Phase_C": {
+   "id": 25,
+   "type": "Current",
+   "current_expr": "Ia_max*sin(omega*time+120deg)",
+   "parallel_branches": "a",
+   "is_solid": false
+  },
+  "Phase_B": {
+   "id": 38,
+   "type": "Current",
+   "current_expr": "Ia_max*sin(omega*time-120deg)",
+   "parallel_branches": "a",
+   "is_solid": false
+  }
+ },
+ "코일수": 36,
+ "벡터포텐셜_경계": {
+  "name": "VectorPotential1",
+  "value": "0"
+ },
+ "모션": {
+  "type": "Band",
+  "move_type": "Rotate",
+  "axis": "Z",
+  "init_pos_expr": "ini_pos",
+  "angular_velocity_expr": "BaseRPM"
+ },
+ "솔브": {
+  "name": "Setup1",
+  "type": "Transient",
+  "stop_time_expr": "stop_time",
+  "time_step_expr": "time_step",
+  "nonlinear_residual": 0.0001
+ },
+ "메시연산": [
+  {
+   "name": "Band",
+   "restrict_length": false,
+   "max_length": "0.2mm",
+   "restrict_elem": true,
+   "max_elems": 5000
+  },
+  {
+   "name": "Coil",
+   "restrict_length": false,
+   "max_length": "1.59373217461099mm",
+   "restrict_elem": true,
+   "max_elems": 200
+  },
+  {
+   "name": "Region",
+   "restrict_length": false,
+   "max_length": "15.15mm",
+   "restrict_elem": true,
+   "max_elems": 1000
+  },
+  {
+   "name": "Rotor",
+   "restrict_length": false,
+   "max_length": "9.4mm",
+   "restrict_elem": true,
+   "max_elems": 1000
+  },
+  {
+   "name": "Stator",
+   "restrict_length": false,
+   "max_length": "15mm",
+   "restrict_elem": true,
+   "max_elems": 1000
+  },
+  {
+   "name": "Magnet",
+   "restrict_length": false,
+   "max_length": "1.63449024066232mm",
+   "restrict_elem": true,
+   "max_elems": 400
+  },
+  {
+   "name": "CylindricalGap1",
+   "restrict_length": false,
+   "max_length": null,
+   "restrict_elem": false,
+   "max_elems": 0
+  }
+ ]
+}
