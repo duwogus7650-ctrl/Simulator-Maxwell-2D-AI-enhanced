@@ -220,7 +220,7 @@ def build_motor(v_si: Dict[str, float], magnet_style: str = "spline",
     teeth = []
     for c in tooth_centers:
         rot = math.degrees(c)
-        tooth = box(r_b0 - 0.05, -v["W_t"] / 2,
+        tooth = box(r_b0, -v["W_t"] / 2,
                     r_b0 + v["H_t"] + v["d_1"] + v["d_2"], v["W_t"] / 2)
         shoe_pts = [(r_b1 * math.cos(th_ss2 / 2), r_b1 * math.sin(th_ss2 / 2))]
         shoe_pts += _arc(r_b0, th_ss / 2, -th_ss / 2, 64)
