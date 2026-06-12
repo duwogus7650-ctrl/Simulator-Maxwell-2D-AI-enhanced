@@ -24,7 +24,9 @@ Ansys Maxwell 2D 트랜션트 해석을 Python으로 재현하고, 그 위에
   SAC 정책 개선, FEM 검증 후보 테이블) ⑤Result(기준 vs 최적 비교표·오버레이·aedt 내보내기)
 - aedt 내보내기: 최적 변수셋을 원본에 주입(VariableProp 치환) — 재파싱 라운드트립 검증,
   종속 수식(theta_one 등) 자동 전파, Maxwell에서 즉시 해석 가능
-- 실행: `python gui/app.py 모델.aedt`
+- 실행: `run_gui.bat` (또는 `venv\Scripts\python gui/app.py 모델.aedt`)
+  — 시스템 Python에는 shapely/triangle이 없어 venv 필수. 예외는 다이얼로그로
+  표시되며 앱은 유지됨(PyQt6 abort 방지 excepthook 적용)
 
 ### P6 — 최적화 (시나리오: 토크 ≥848.7 + EMF 6.17±5% + 자석 최소화)
 - Derringer-Suich 만족도 D, 액티브러닝 4라운드(DE 최적화→FEM 검증→데이터 보강→재학습)
@@ -39,6 +41,14 @@ Ansys Maxwell 2D 트랜션트 해석을 Python으로 재현하고, 그 위에
 - 유효 95 / 메시폭주 등 실패 26 — 설계별 자식 프로세스 격리로 OOM 면역 러너
 - **T_avg R²=0.988(0.4%) · EMF R²=0.994(0.3%) · magnet_area R²=1.0** → P6 최적화 목적함수 확보
 - ripple/B_tooth는 경량평가 노이즈로 학습 불가 → P6에서 FEM 검증 루프 담당(액티브러닝)으로 처리
+
+### P4 확장 v2 검증 — 손실·효율 (PDF Rev1 p.7 대조, 2026-06-12)
+- 400W(4500rpm/4.9A): **T_avg 874.4 mNm(+2.9%) · P_fe 11.8 W(Maxwell 15.8, −25%)
+  · η 94.2%(자석손 2.2W 가산; Maxwell 93.1)** — scripts/run_400w_loss.py
+- 200W(L_stk 15×0.93, 3.7A): T_avg 497.5(+3.6%) · P_fe 8.8(−21%) · η 93.8(92.4)
+- 코깅(최적화 형상): 가상일 6.31 mNm vs Maxwell 5.95 (+6.0%) — 구 4.93은 최적화 전 기준
+- P_fe는 ±25% 신뢰구간(고조파 Bertotti vs Maxwell 시간영역 차이),
+  동손은 R_ph 실측 입력 필수(기하 추정 ~50% 과소) — docs/p4_loss_patch_notes.md 참조
 
 ### P4 검증 (부하: 4.9 Arms · β=0 · 적층계수 0.97 적용)
 - **평균토크(가상일): 868.2 mNm** (Maxwell 848.7, **+2.3%**) — 통과

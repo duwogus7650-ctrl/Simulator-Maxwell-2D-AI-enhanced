@@ -1,0 +1,44 @@
+design=4. 400W_BasicModel_Load_Optimized style=spline vars=37
+[코깅 회귀] 건너뜀 (이전 실행: 가상일 6.31 / Arkkio 6.63 mNm)
+[γ 캘리브레이션] γ*=190.9° T_max≈923 mNm probes={0.0: -915, 90.0: -168, 180.0: 897, 270.0: 180} | 21s
+  step  1/36  ang=-12.400°  T=  0.8739 N·m  NR=8 res=8.69e-05
+  step  2/36  ang=-11.150°  T=  0.8688 N·m  NR=8 res=9.24e-05
+  step  3/36  ang= -9.900°  T=  0.8751 N·m  NR=8 res=2.12e-05
+  step  4/36  ang= -8.650°  T=  0.8788 N·m  NR=8 res=2.55e-05
+  step  5/36  ang= -7.400°  T=  0.8928 N·m  NR=8 res=1.28e-05
+  step  6/36  ang= -6.150°  T=  0.8877 N·m  NR=8 res=1.72e-05
+  step  7/36  ang= -4.900°  T=  0.8679 N·m  NR=8 res=1.52e-05
+  step  8/36  ang= -3.650°  T=  0.8596 N·m  NR=9 res=7.75e-05
+  step  9/36  ang= -2.400°  T=  0.8666 N·m  NR=8 res=3.58e-05
+  step 10/36  ang= -1.150°  T=  0.8667 N·m  NR=8 res=2.18e-05
+  step 11/36  ang=  0.100°  T=  0.8818 N·m  NR=8 res=4.85e-05
+  step 12/36  ang=  1.350°  T=  0.8762 N·m  NR=8 res=1.62e-05
+  step 13/36  ang=  2.600°  T=  0.8680 N·m  NR=8 res=2.15e-05
+  step 14/36  ang=  3.850°  T=  0.8599 N·m  NR=8 res=2.45e-05
+  step 15/36  ang=  5.100°  T=  0.8690 N·m  NR=8 res=2.89e-05
+  step 16/36  ang=  6.350°  T=  0.8717 N·m  NR=9 res=6.34e-05
+  step 17/36  ang=  7.600°  T=  0.8867 N·m  NR=8 res=1.58e-05
+  step 18/36  ang=  8.850°  T=  0.8860 N·m  NR=8 res=3.00e-05
+  step 19/36  ang= 10.100°  T=  0.8762 N·m  NR=8 res=8.69e-05
+  step 20/36  ang= 11.350°  T=  0.8710 N·m  NR=8 res=9.24e-05
+  step 21/36  ang= 12.600°  T=  0.8735 N·m  NR=8 res=2.12e-05
+  step 22/36  ang= 13.850°  T=  0.8751 N·m  NR=8 res=2.55e-05
+  step 23/36  ang= 15.100°  T=  0.8901 N·m  NR=8 res=1.27e-05
+  step 24/36  ang= 16.350°  T=  0.8857 N·m  NR=8 res=1.72e-05
+  step 25/36  ang= 17.600°  T=  0.8649 N·m  NR=8 res=1.52e-05
+  step 26/36  ang= 18.850°  T=  0.8574 N·m  NR=9 res=7.74e-05
+  step 27/36  ang= 20.100°  T=  0.8679 N·m  NR=8 res=3.58e-05
+  step 28/36  ang= 21.350°  T=  0.8685 N·m  NR=8 res=2.18e-05
+  step 29/36  ang= 22.600°  T=  0.8824 N·m  NR=8 res=4.85e-05
+  step 30/36  ang= 23.850°  T=  0.8772 N·m  NR=8 res=1.62e-05
+  step 31/36  ang= 25.100°  T=  0.8703 N·m  NR=8 res=2.15e-05
+  step 32/36  ang= 26.350°  T=  0.8615 N·m  NR=8 res=2.44e-05
+  step 33/36  ang= 27.600°  T=  0.8701 N·m  NR=8 res=2.88e-05
+  step 34/36  ang= 28.850°  T=  0.8733 N·m  NR=9 res=6.35e-05
+  step 35/36  ang= 30.100°  T=  0.8889 N·m  NR=8 res=1.58e-05
+  step 36/36  ang= 31.350°  T=  0.8880 N·m  NR=8 res=3.01e-05
+
+=== PDF 기준: T 850 mNm | 리플 2.97% | P_cu 11.4 | P_fe 15.8 | 자석 2.2 | η 93.1% ===
+[기하 R_ph] T_avg 874.4 mNm | 리플 4.05% (35.4 mNm pp) | P_fe 11.8 W (st 11.7/rt 0.09) | P_cu 5.7 W (R_ph 79 mΩ, 추정) | η 95.93%
+[PDF  R_ph] T_avg 874.4 mNm | 리플 4.05% (35.4 mNm pp) | P_fe 11.8 W (st 11.7/rt 0.09) | P_cu 11.4 W (R_ph 158 mΩ) | η 94.68%  (R_ph=158 mΩ, PDF 동손 역산)
+[자석손 2.2W 가산 시] η 94.20% | 총 88s

@@ -21,10 +21,13 @@ _UNIT_FACTORS = {
     "Hz": 1.0, "cel": 1.0,
 }
 
+_UNIT_ALT = "|".join(sorted(_UNIT_FACTORS, key=len, reverse=True))
+
 _NUM_UNIT_RE = re.compile(
-    r"(?<![\w.])(\d+\.?\d*(?:[eE][+-]?\d+)?)\s*(" +
-    "|".join(sorted(_UNIT_FACTORS, key=len, reverse=True)) + r")\b"
+    r"(?<![\w.])(\d+\.?\d*(?:[eE][+-]?\d+)?)\s*(" + _UNIT_ALT + r")\b"
 )
+# '(12.16*0.97) mm' — 괄호 닫힌 수식 뒤에 단위가 붙는 형태
+_PAREN_UNIT_RE = re.compile(r"\)\s*(" + _UNIT_ALT + r")\b")
 
 _ALLOWED_FUNCS = {
     "sin": math.sin, "cos": math.cos, "tan": math.tan,
@@ -41,7 +44,9 @@ def _replace_units(expr: str) -> str:
     def sub(m: re.Match) -> str:
         val, unit = m.group(1), m.group(2)
         return f"({val}*{_UNIT_FACTORS[unit]!r})"
-    return _NUM_UNIT_RE.sub(sub, expr)
+    expr = _NUM_UNIT_RE.sub(sub, expr)
+    return _PAREN_UNIT_RE.sub(
+        lambda m: f")*{_UNIT_FACTORS[m.group(1)]!r}", expr)
 
 
 class _SafeEval(ast.NodeVisitor):

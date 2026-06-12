@@ -21,7 +21,7 @@ import numpy as np
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QFileDialog, QGridLayout,
-    QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
+    QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMainWindow, QMessageBox,
     QPlainTextEdit, QPushButton, QSplitter, QTableWidget, QTableWidgetItem,
     QTabWidget, QVBoxLayout, QWidget)
 
@@ -39,6 +39,27 @@ from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 
 DESIGN_VARS = ["a_m", "T_m", "T_m2", "W_t", "MagnetR"]
+
+
+def _error_dialog(parent, title: str, exc: BaseException):
+    """예외 → 사용자 안내 다이얼로그. PyQt6는 슬롯 내 미처리 예외 시
+    앱을 abort시키므로 사용자 동작 슬롯은 반드시 이걸로 감싼다."""
+    if isinstance(exc, ModuleNotFoundError):
+        msg = (f"필요한 패키지가 없습니다: {exc.name}\n\n"
+               "venv의 Python으로 실행하세요:\n"
+               "    venv\\Scripts\\python gui\\app.py\n"
+               "또는 run_gui.bat 더블클릭")
+    elif isinstance(exc, KeyError):
+        msg = (f"이 설계는 지원하지 않는 변수 구성입니다 "
+               f"(필수 변수 {exc} 없음)")
+    else:
+        msg = f"{type(exc).__name__}: {exc}"
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Critical)
+    box.setWindowTitle(title)
+    box.setText(msg)
+    box.setDetailedText("".join(traceback.format_exception(exc)))
+    box.exec()
 
 
 # ====================================================================== 워커
@@ -114,6 +135,13 @@ class MainWindow(QMainWindow):
                 self, "Maxwell 프로젝트", "", "AEDT (*.aedt)")
         if not path:
             return
+        try:
+            self._load_aedt(path)
+        except Exception as e:
+            self.statusBar().showMessage(f"로드 실패: {os.path.basename(path)}")
+            _error_dialog(self, "aedt 열기 실패", e)
+
+    def _load_aedt(self, path):
         from motoropt.aedt_parser import parse_aedt, detect_magnet_style
         self.model = parse_aedt(path)
         self.style = detect_magnet_style(self.model)
@@ -136,7 +164,7 @@ class MainWindow(QMainWindow):
             it2 = QTableWidgetItem(disp)
             it2.setFlags(it2.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.tbl_vars.setItem(i, 2, it2)
-        self.refresh_geometry()
+        self._refresh_geometry()
         self.statusBar().showMessage(f"{os.path.basename(path)} 로드 완료")
 
     def current_raw(self):
@@ -149,6 +177,13 @@ class MainWindow(QMainWindow):
     def refresh_geometry(self):
         if self.model is None:
             return
+        try:
+            self._refresh_geometry()
+        except Exception as e:
+            self.statusBar().showMessage("형상 갱신 실패")
+            _error_dialog(self, "형상 갱신 실패", e)
+
+    def _refresh_geometry(self):
         from motoropt.expressions import resolve_variables
         from motoropt.geometry import build_motor
         v = resolve_variables(self.current_raw())
@@ -502,6 +537,14 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    # PyQt6는 미처리 예외 시 qFatal(abort) — 다이얼로그로 대체해 앱 유지
+    def hook(tp, val, tb):
+        traceback.print_exception(tp, val, tb)
+        try:
+            _error_dialog(None, "내부 오류", val)
+        except Exception:
+            pass
+    sys.excepthook = hook
     win = MainWindow()
     if len(sys.argv) > 1 and sys.argv[1].endswith(".aedt"):
         win.open_aedt(sys.argv[1])
