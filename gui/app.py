@@ -51,9 +51,13 @@ import matplotlib.font_manager as _fm
 for _f in ("/usr/share/fonts/truetype/nanum/NanumGothic.ttf",):
     try:
         _fm.fontManager.addfont(_f)
-        matplotlib.rcParams["font.family"] = "NanumGothic"
     except Exception:
         pass
+_avail = {f.name for f in _fm.fontManager.ttflist}
+for _name in ("Malgun Gothic", "NanumGothic", "AppleGothic"):
+    if _name in _avail:                      # Windows는 맑은 고딕
+        matplotlib.rcParams["font.family"] = _name
+        break
 matplotlib.rcParams["axes.unicode_minus"] = False
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
@@ -110,6 +114,7 @@ class MainWindow(QMainWindow):
         self.geo = None
         self.aedt_path = None
         self.last_solve = None     # (solver, result, 메트릭 dict)
+        self.last_responses = None # 부하 스윕 응답 dict
         self.candidates = []       # 최적화 후보 [(D, x, fem)]
         self._workers = []
 
@@ -184,6 +189,10 @@ class MainWindow(QMainWindow):
             it2 = QTableWidgetItem(disp)
             it2.setFlags(it2.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.tbl_vars.setItem(i, 2, it2)
+        if v.get("BaseRPM"):
+            self.sp_rpm.setValue(float(v["BaseRPM"]))
+        if v.get("I_rms"):
+            self.sp_irms.setValue(float(v["I_rms"]))
         self._refresh_geometry()
         self.statusBar().showMessage(f"{os.path.basename(path)} 로드 완료")
 
@@ -246,33 +255,64 @@ class MainWindow(QMainWindow):
         lay.addWidget(QLabel(
             "<b>목표 특성 (Derringer-Suich 만족도)</b> — "
             "유형: larger(↑)/smaller(↓)/target(목표값)"))
-        self.tbl_obj = QTableWidget(3, 5)
+        from motoropt.objective import SPEC, SPEC_EXTRA
+        rows = [(k, s, True) for k, s in SPEC.items()] + \
+               [(k, s, False) for k, s in SPEC_EXTRA.items()]
+        self.tbl_obj = QTableWidget(len(rows), 6)
         self.tbl_obj.setHorizontalHeaderLabels(
-            ["응답", "유형", "L (하한)", "T (목표)", "U (상한)"])
+            ["사용", "응답", "유형", "L (하한)", "T (목표)", "U (상한)"])
         self.tbl_obj.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch)
-        from motoropt.objective import SPEC
-        for i, (k, spec) in enumerate(SPEC.items()):
-            self.tbl_obj.setItem(i, 0, QTableWidgetItem(k))
+        for i, (k, spec, on) in enumerate(rows):
+            chk = QTableWidgetItem()
+            chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable |
+                         Qt.ItemFlag.ItemIsEnabled)
+            chk.setCheckState(Qt.CheckState.Checked if on
+                              else Qt.CheckState.Unchecked)
+            self.tbl_obj.setItem(i, 0, chk)
+            name = QTableWidgetItem(k)
+            name.setFlags(name.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.tbl_obj.setItem(i, 1, name)
             cb = QComboBox(); cb.addItems(["larger", "smaller", "target"])
             cb.setCurrentText(spec[0])
-            self.tbl_obj.setCellWidget(i, 1, cb)
-            nums = spec[1:]
-            cols = {"larger": (2, None, 4), "smaller": (2, None, 4),
-                    "target": (2, 3, 4)}
+            self.tbl_obj.setCellWidget(i, 2, cb)
             if spec[0] == "target":
-                vals = {2: nums[0], 3: nums[1], 4: nums[2]}
+                vals = {3: spec[1], 4: spec[2], 5: spec[3]}
             else:
-                vals = {2: nums[0], 4: nums[1]}
-            for c in (2, 3, 4):
+                vals = {3: spec[1], 5: spec[2]}
+            for c in (3, 4, 5):
                 self.tbl_obj.setItem(
                     i, c, QTableWidgetItem(
                         f"{vals[c]:.4g}" if c in vals else ""))
         lay.addWidget(self.tbl_obj)
-        lay.addWidget(QLabel("종합 만족도 D = (∏ dᵢ)^(1/n) — 모든 목표를 "
-                             "동시에 만족할수록 1에 가까움"))
+        lay.addWidget(QLabel(
+            "종합 만족도 D = (∏ dᵢ)^(1/n) — 모든 목표를 동시에 만족할수록 "
+            "1에 가까움.<br>efficiency·ripple_pct는 Solve 탭 ▶부하 스윕에서 "
+            "FEM으로 평가됩니다 (efficiency는 서로게이트 응답에 없어 "
+            "Optimize의 DE 탐색에는 미참여)."))
         lay.addStretch(1)
         return w
+
+    def _spec_from_table(self) -> dict:
+        """Objective 테이블의 체크된 행 → SPEC dict."""
+        spec = {}
+        for i in range(self.tbl_obj.rowCount()):
+            if self.tbl_obj.item(i, 0).checkState() != Qt.CheckState.Checked:
+                continue
+            k = self.tbl_obj.item(i, 1).text().strip()
+            typ = self.tbl_obj.cellWidget(i, 2).currentText()
+            try:
+                L = float(self.tbl_obj.item(i, 3).text())
+                U = float(self.tbl_obj.item(i, 5).text())
+                if typ == "target":
+                    spec[k] = (typ, L, float(self.tbl_obj.item(i, 4).text()), U)
+                else:
+                    spec[k] = (typ, L, U)
+            except (TypeError, ValueError):
+                raise ValueError(f"Objective 행 '{k}'의 L/T/U 값이 잘못됨")
+        if not spec:
+            raise ValueError("체크된 목표 특성이 없음")
+        return spec
 
     # ---------------------------------------------------------- ③ Solve
     def _tab_solve(self):
@@ -283,6 +323,27 @@ class MainWindow(QMainWindow):
         b2 = QPushButton("▶ 부하 해석 (정격 전류·MTPA)")
         b2.clicked.connect(lambda: self.run_solve(load=True))
         left.addWidget(b1); left.addWidget(b2)
+
+        grp = QGroupBox("부하 스윕 — 효율·토크리플·손실 (전기 1주기)")
+        g = QGridLayout(grp)
+        self.sp_rpm = QDoubleSpinBox(); self.sp_rpm.setRange(1, 50000)
+        self.sp_rpm.setDecimals(0); self.sp_rpm.setValue(3000)
+        self.sp_irms = QDoubleSpinBox(); self.sp_irms.setRange(0.01, 1000)
+        self.sp_irms.setDecimals(2); self.sp_irms.setValue(5.0)
+        self.sp_rph = QDoubleSpinBox(); self.sp_rph.setRange(0, 10000)
+        self.sp_rph.setDecimals(1); self.sp_rph.setValue(0.0)
+        self.sp_nstep = QDoubleSpinBox(); self.sp_nstep.setRange(6, 120)
+        self.sp_nstep.setDecimals(0); self.sp_nstep.setValue(36)
+        for col, (lbl, w_) in enumerate(
+                [("속도 [rpm]", self.sp_rpm), ("상전류 [Arms]", self.sp_irms),
+                 ("상저항 [mΩ] (0=추정⚠)", self.sp_rph),
+                 ("스텝", self.sp_nstep)]):
+            g.addWidget(QLabel(lbl), 0, col)
+            g.addWidget(w_, 1, col)
+        b3 = QPushButton("▶ 부하 스윕 실행 (γ 캘리브레이션 포함 — 수 분 소요)")
+        b3.clicked.connect(self.run_load_sweep)
+        g.addWidget(b3, 2, 0, 1, 4)
+        left.addWidget(grp)
         self.log_solve = QPlainTextEdit(); self.log_solve.setReadOnly(True)
         left.addWidget(self.log_solve, 1)
         lw = QWidget(); lw.setLayout(left)
@@ -306,13 +367,15 @@ class MainWindow(QMainWindow):
             from motoropt.solver_ms import Magnetostatic2D
             from motoropt.postproc import (torque_arkkio, coenergy,
                                            build_winding_map)
+            from motoropt.aedt_parser import detect_material_names
             v = resolve_variables(raw)
             geo = build_motor(v, style)
+            steel, magnet = detect_material_names(model)
+            log(f"재질: 강판={steel} / 자석={magnet}")
             log("형상/메시 생성...")
             sbm = SlidingBandMesh(geo, n_band=2880)
             s = Magnetostatic2D(sbm.merge(0.0), model["materials"],
-                                "20PNX1200F_20C",
-                                "Arnold_Magnetics_N45UH_80C")
+                                steel, magnet)
             if load:
                 wmap = build_winding_map(s)
                 Ia = v["I_rms"] * math.sqrt(2)
@@ -342,6 +405,58 @@ class MainWindow(QMainWindow):
             return s, res, met
 
         self._spawn(job, self.log_solve.appendPlainText, self._solve_done)
+
+    def run_load_sweep(self):
+        if self.geo is None:
+            self.log_solve.appendPlainText("⚠ 먼저 Model 탭에서 aedt를 여세요")
+            return
+        model, style, raw = self.model, self.style, self.current_raw()
+        rpm = float(self.sp_rpm.value())
+        irms = float(self.sp_irms.value())
+        rph = float(self.sp_rph.value()) * 1e-3 or None    # mΩ → Ω, 0=추정
+        nstep = int(self.sp_nstep.value())
+
+        def job(log):
+            from motoropt.expressions import resolve_variables
+            from motoropt.aedt_parser import detect_material_names
+            from motoropt.sweep_loss import (sweep_load_with_fields,
+                                             compute_responses,
+                                             calibrate_gamma)
+            v = resolve_variables(raw)
+            m2 = dict(model); m2["variables"] = v
+            steel, magnet = detect_material_names(m2)
+            ini = math.degrees(v.get("ini_pos", 0.0))
+            log(f"재질: 강판={steel} / 자석={magnet}")
+            log("γ 캘리브레이션 (4점 프로브 × 6스텝)...")
+            cal = calibrate_gamma(m2, style, rpm=rpm, I_rms=irms,
+                                  n_steps=6, init_pos_deg=ini)
+            log(f"γ* = {cal['gamma_max_deg']:.1f}°  "
+                f"(T_max≈{cal['T_max_est']:.3f} N·m)")
+            log(f"부하 스윕 {nstep}스텝 @ {rpm:.0f}rpm / {irms:.2f}Arms...")
+            sw = sweep_load_with_fields(m2, style, rpm=rpm, I_rms=irms,
+                                        gamma_deg=cal["gamma_max_deg"],
+                                        n_steps=nstep, init_pos_deg=ini,
+                                        steel_name=steel, magnet_name=magnet)
+            r = compute_responses(sw, m2, R_ph_ohm=rph)
+            warn = " ⚠기하추정(엔드와인딩 미포함)" if r["R_ph_estimated"] else ""
+            log(f"── 응답 ──\n"
+                f"T_avg       {r['T_avg']:.4f} N·m\n"
+                f"ripple_pct  {r['T_ripple_pct']:.2f} %  "
+                f"({r['T_ripple_pp']*1e3:.1f} mNm pp, Arkkio)\n"
+                f"P_fe        {r['P_fe']:.2f} W "
+                f"(히 {r['P_fe_stator']['P_hyst']:.1f} / "
+                f"와 {r['P_fe_stator']['P_eddy']:.1f} / "
+                f"과잉 {r['P_fe_stator']['P_excess']:.1f})\n"
+                f"P_cu        {r['P_cu']:.2f} W "
+                f"(R_ph {r['R_ph']*1e3:.1f} mΩ{warn})\n"
+                f"efficiency  {r['efficiency']*100:.2f} % "
+                f"(자석 와류손·기계손 미포함)")
+            return r
+
+        self._spawn(job, self.log_solve.appendPlainText, self._sweep_done)
+
+    def _sweep_done(self, r):
+        self.last_responses = r
 
     def _solve_done(self, out):
         s, res, met = out
@@ -394,6 +509,11 @@ class MainWindow(QMainWindow):
             self.log_opt.appendPlainText("⚠ 먼저 Model 탭에서 aedt를 여세요")
             return
         aedt = self.aedt_path
+        try:
+            spec = self._spec_from_table()
+        except ValueError as e:
+            self.log_opt.appendPlainText(f"⚠ {e}")
+            return
 
         def job(log):
             from scipy.optimize import differential_evolution
@@ -401,11 +521,15 @@ class MainWindow(QMainWindow):
             from motoropt.surrogate import (load_dataset, train_surrogate,
                                             save, X_KEYS, Y_KEYS)
             from motoropt.objective import SurrogateObjective, desirability
+            skipped = [k for k in spec if k not in Y_KEYS]
+            if skipped:
+                log(f"ℹ 서로게이트 응답에 없어 제외: {', '.join(skipped)} "
+                    "(Solve 탭 부하 스윕으로 평가)")
             log("서로게이트 재학습...")
             X, Y = load_dataset("doe_results.jsonl")
             mdl, sc, met, _ = train_surrogate(X, Y)
             save(mdl, sc, "surrogate.joblib")
-            obj = SurrogateObjective("surrogate.joblib", BOUNDS)
+            obj = SurrogateObjective("surrogate.joblib", BOUNDS, spec=spec)
             log(f"DE 최적화 (샘플 {len(X)})...")
             r = differential_evolution(lambda u: -obj.D(u)[0],
                                        [(0, 1)] * 5, seed=0,
@@ -420,7 +544,7 @@ class MainWindow(QMainWindow):
                 log(f"FEM 실패: {fem['status'][:40]}")
                 return None
             Yv = np.array([[fem[k] for k in Y_KEYS]])
-            D = float(desirability(Yv)[0])
+            D = float(desirability(Yv, spec=spec)[0])
             log(f"FEM D={D:.4f} | T={fem['T_avg']:.1f} "
                 f"EMF={fem['emf_rms']:.3f} A={fem['magnet_area']:.1f}")
             return (D, xd, fem)
@@ -527,7 +651,8 @@ class MainWindow(QMainWindow):
             for ring in [geo.stator.exterior] + list(geo.stator.interiors):
                 arr = np.asarray(ring.coords)
                 ax.plot(arr[:, 0], arr[:, 1], color=c, lw=lw * 0.6, alpha=.8)
-        ax.set_xlim(0, 36); ax.set_ylim(14, 40)
+        lim = self.geo.region_radius * 1.02
+        ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
         ax.set_aspect("equal")
         ax.set_title("기준(회색) vs 최적(적색)")
         self.cv_res.draw()

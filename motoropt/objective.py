@@ -33,26 +33,46 @@ SPEC = {
     "magnet_area": ("smaller", 250.0, 339.22),
 }
 
+# 추가 응답 (GUI에서 체크 시 사용) — ripple_pct는 서로게이트 응답에 있으나
+# 경량평가 노이즈가 커 참고용, efficiency는 부하 스윕(FEM)에서만 평가됨.
+SPEC_EXTRA = {
+    "ripple_pct": ("smaller", 1.0, 5.0),
+    "efficiency": ("larger", 0.90, 0.95),
+}
 
-def desirability(Y: np.ndarray) -> np.ndarray:
-    """Y: (n, len(Y_KEYS)) 응답 행렬 → D (n,)"""
-    iT = Y_KEYS.index("T_avg")
-    iE = Y_KEYS.index("emf_rms")
-    iA = Y_KEYS.index("magnet_area")
-    dT = d_larger(Y[:, iT], *SPEC["T_avg"][1:])
-    dE = d_target(Y[:, iE], *SPEC["emf_rms"][1:])
-    dA = d_smaller(Y[:, iA], *SPEC["magnet_area"][1:])
-    return (dT * dE * dA) ** (1 / 3)
+_D_FUNCS = {"larger": d_larger, "smaller": d_smaller, "target": d_target}
+
+
+def desirability(Y: np.ndarray, spec: dict | None = None) -> np.ndarray:
+    """Y: (n, len(Y_KEYS)) 응답 행렬 → D (n,).
+
+    spec의 키 중 Y_KEYS에 있는 응답만 기하평균에 참여한다.
+    """
+    spec = spec or SPEC
+    Y = np.atleast_2d(np.asarray(Y, float))
+    D = np.ones(Y.shape[0])
+    n = 0
+    for j, k in enumerate(Y_KEYS):
+        if k not in spec:
+            continue
+        s = spec[k]
+        D = D * _D_FUNCS[s[0]](Y[:, j], *s[1:])
+        n += 1
+    if n == 0:
+        raise ValueError("스펙에 서로게이트 응답(Y_KEYS)이 하나도 없음")
+    return D ** (1.0 / n)
 
 
 class SurrogateObjective:
     """정규화 입력 u∈[0,1]^5 → D. RL/GA 공용 평가기."""
 
-    def __init__(self, bundle_path: str, bounds: dict):
+    def __init__(self, bundle_path: str, bounds: dict,
+                 spec: dict | None = None):
         import joblib
         b = joblib.load(bundle_path)
         self.model, self.mu, self.sd = b["model"], b["mu"], b["sd"]
         self.keys = b["x_keys"]
+        self.spec = spec
         self.lo = np.array([bounds[k][0] for k in self.keys])
         self.hi = np.array([bounds[k][1] for k in self.keys])
 
@@ -64,4 +84,4 @@ class SurrogateObjective:
         return self.model.predict(self.x_of(u)) * self.sd + self.mu
 
     def D(self, u: np.ndarray) -> np.ndarray:
-        return desirability(self.predict(u))
+        return desirability(self.predict(u), spec=self.spec)

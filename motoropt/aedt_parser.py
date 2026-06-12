@@ -344,6 +344,27 @@ def parse_aedt(path: str) -> dict:
     return model
 
 
+def detect_material_names(model: dict) -> tuple:
+    """(강판, 자석) 재질명 자동 감지.
+
+    자석: |Hc| > 1e3 A/m. 강판: BH 곡선 보유 + Hc≈0 (일부 강판 재질은
+    coercivity 키를 0으로 가짐) — 철손 계수(core_loss_kh) 있는 쪽 우선.
+    """
+    steel = steel_kh = magnet = None
+    for name, mat in model["materials"].items():
+        if abs(mat.get("coercivity_A_per_m", 0.0)) > 1e3:
+            magnet = magnet or name
+        elif "bh_curve" in mat:
+            if "core_loss_kh" in mat:
+                steel_kh = steel_kh or name
+            steel = steel or name
+    steel = steel_kh or steel
+    if steel is None or magnet is None:
+        raise ValueError("강판/자석 재질 자동 감지 실패 — materials: "
+                         + ", ".join(model["materials"]))
+    return steel, magnet
+
+
 def detect_magnet_style(model: dict) -> str:
     """자석 파트의 폴리라인 세그먼트로 작도 스타일 판별.
 
