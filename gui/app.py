@@ -15,7 +15,27 @@ import traceback
 import warnings
 
 warnings.filterwarnings("ignore")
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, _ROOT)
+
+
+def _ensure_venv():
+    """해석 패키지(shapely/triangle)가 없는 인터프리터로 실행되면
+    프로젝트 venv의 Python으로 재실행한다 (triangle은 시스템 Python
+    3.14용 wheel이 없어 venv 필수)."""
+    import importlib.util
+    if importlib.util.find_spec("shapely") and importlib.util.find_spec("triangle"):
+        return
+    vpy = os.path.join(_ROOT, "venv", "Scripts", "python.exe")
+    if os.path.exists(vpy) and \
+            os.path.normcase(vpy) != os.path.normcase(sys.executable):
+        import subprocess
+        print(f"[gui] 해석 패키지가 없는 Python — venv로 재실행: {vpy}",
+              file=sys.stderr)
+        sys.exit(subprocess.call([vpy] + sys.argv))
+
+
+_ensure_venv()
 
 import numpy as np
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
