@@ -16,7 +16,15 @@ Ansys Maxwell 2D 트랜션트 해석을 Python으로 재현하고, 그 위에
 | P4 | 부하 해석 (토크 · 리플) | ✅ 평균토크 +2.3% 통과 |
 | P5 | DOE + 서로게이트 NN | ✅ 주목적 R²>0.99 |
 | P6 | RL(SAC)+액티브러닝 최적화, GA 벤치마크 | ✅ 자석 −21~26% (FEM 검증) |
-| P7 | PyQt6 GUI 통합 · aedt 내보내기 | ⏳ |
+| P7 | PyQt6 GUI 통합 · aedt 내보내기 | ✅ 5탭 데스크톱 앱 |
+
+### P7 — PyQt6 데스크톱 앱 (gui/app.py)
+- 5탭: ①Model(aedt 로드·변수표 편집·형상 미리보기) ②Objective(D-S 스펙 편집)
+  ③Solve(무부하/부하 해석, QThread 비차단, |B| 필드맵) ④Optimize(액티브러닝 1라운드 버튼,
+  SAC 정책 개선, FEM 검증 후보 테이블) ⑤Result(기준 vs 최적 비교표·오버레이·aedt 내보내기)
+- aedt 내보내기: 최적 변수셋을 원본에 주입(VariableProp 치환) — 재파싱 라운드트립 검증,
+  종속 수식(theta_one 등) 자동 전파, Maxwell에서 즉시 해석 가능
+- 실행: `python gui/app.py 모델.aedt`
 
 ### P6 — 최적화 (시나리오: 토크 ≥848.7 + EMF 6.17±5% + 자석 최소화)
 - Derringer-Suich 만족도 D, 액티브러닝 4라운드(DE 최적화→FEM 검증→데이터 보강→재학습)
