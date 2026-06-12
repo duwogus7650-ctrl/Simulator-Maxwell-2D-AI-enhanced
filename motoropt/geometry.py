@@ -190,6 +190,12 @@ def build_motor(v_si: Dict[str, float], magnet_style: str = "spline",
                "Magnet_R_Offset", "L_stk")
     v = {k: (val * MM if k in mm_keys else val) for k, val in v_si.items()}
 
+    if v["D_ro"] > v["D_so"]:
+        raise ValueError("외전형(outer-rotor) 모델 — 현재 내전형만 지원")
+    if "theta_one" not in v:
+        raise ValueError("지원하지 않는 변수 구성 (theta_one 없음 — "
+                         "파라메트릭 내전형 SPM 작도가 아닌 모델)")
+
     n_slot = int(round(v["N_slot"]))
     n_pole = int(round(v["N_pole"]))
     th1 = v["theta_one"]

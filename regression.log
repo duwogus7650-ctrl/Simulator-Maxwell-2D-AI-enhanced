@@ -1,0 +1,18 @@
+   400W.aedt: 무부하 OK (46012요소, NR 8, |B|max 2.42T, 1s)
+✅ 400W.aedt: γ*=190.7° T=0.9159 N·m 리플 1.47% P_fe 10.29W η 95.3% | 73.0s
+   750W,1200W.aedt: 무부하 OK (66430요소, NR 8, |B|max 1.97T, 7s)
+✅ 750W,1200W.aedt: γ*=190.3° T=2.1491 N·m 리플 1.0% P_fe 7.34W η 86.0% | 41.7s
+   InnerType_KRO80_120Nm_GearRatio_13_4.aedt: 무부하 OK (44861요소, NR 8, |B|max 2.75T, 1s)
+✅ InnerType_KRO80_120Nm_GearRatio_13_4.aedt: γ*=288.7° T=8.5424 N·m 리플 0.37% P_fe 12.2W η 69.3% | 28.7s
+   InwheelMotor.aedt: 무부하 OK (60232요소, NR 8, |B|max 2.24T, 3s)
+✅ InwheelMotor.aedt: γ*=190.3° T=3.0633 N·m 리플 0.83% P_fe 8.01W η 88.2% | 46.4s
+⏭  OuterType_KRO80_Rev2.aedt: 외전형 — 건너뜀
+   SH_Reducer_25_32.aedt: 무부하 OK (46012요소, NR 8, |B|max 2.42T, 1s)
+✅ SH_Reducer_25_32.aedt: γ*=190.8° T=0.1992 N·m 리플 4.41% P_fe 1.0W η 93.0% | 35.6s
+   SH_Reducer_QDD_14_17.aedt: 무부하 OK (47472요소, NR 8, |B|max 2.85T, 2s)
+✅ SH_Reducer_QDD_14_17.aedt: γ*=190.4° T=0.4445 N·m 리플 1.59% P_fe 2.02W η 93.2% | 32.5s
+   SH_Reducer_QDD_20.aedt: 무부하 OK (46149요소, NR 10, |B|max 2.62T, 2s)
+✅ SH_Reducer_QDD_20.aedt: γ*=190.4° T=1.1608 N·m 리플 0.23% P_fe 1.49W η 80.3% | 43.6s
+⏭  SPG_X12_320.aedt: 외전형 — 건너뜀
+
+=== 회귀 결과: PASS 7 / FAIL 0 / 스킵 2 ===

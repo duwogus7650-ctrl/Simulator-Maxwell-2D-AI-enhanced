@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import sys
 import traceback
 import warnings
@@ -538,6 +539,7 @@ class MainWindow(QMainWindow):
         except ValueError as e:
             self.log_opt.appendPlainText(f"⚠ {e}")
             return
+        dataset, surro = self._dataset_paths()
 
         def job(log):
             from scipy.optimize import differential_evolution
@@ -545,15 +547,21 @@ class MainWindow(QMainWindow):
             from motoropt.surrogate import (load_dataset, train_surrogate,
                                             save, X_KEYS, Y_KEYS)
             from motoropt.objective import SurrogateObjective, desirability
+            if not os.path.exists(dataset):
+                log(f"⚠ 이 모델용 DOE 데이터셋이 없습니다: "
+                    f"{os.path.basename(dataset)}\n"
+                    "서로게이트 최적화는 모델별 DOE(P5, scripts/run_p5_doe.py)가 "
+                    "선행되어야 합니다 — 현재 400W 모델만 데이터 보유.")
+                return None
             skipped = [k for k in spec if k not in Y_KEYS]
             if skipped:
                 log(f"ℹ 서로게이트 응답에 없어 제외: {', '.join(skipped)} "
                     "(Solve 탭 부하 스윕으로 평가)")
-            log("서로게이트 재학습...")
-            X, Y = load_dataset("doe_results.jsonl")
+            log(f"서로게이트 재학습... ({os.path.basename(dataset)})")
+            X, Y = load_dataset(dataset)
             mdl, sc, met, _ = train_surrogate(X, Y)
-            save(mdl, sc, "surrogate.joblib")
-            obj = SurrogateObjective("surrogate.joblib", BOUNDS, spec=spec)
+            save(mdl, sc, surro)
+            obj = SurrogateObjective(surro, BOUNDS, spec=spec)
             log(f"DE 최적화 (샘플 {len(X)})...")
             r = differential_evolution(lambda u: -obj.D(u)[0],
                                        [(0, 1)] * 5, seed=0,
@@ -562,7 +570,7 @@ class MainWindow(QMainWindow):
             log(f"서로게이트 D={-r.fun:.4f} → FEM 검증 중 (~30초)...")
             _init(aedt)
             fem = _eval(xd)
-            with open("doe_results.jsonl", "a") as f:
+            with open(dataset, "a") as f:
                 f.write(json.dumps(fem) + "\n")
             if fem["status"] != "ok":
                 log(f"FEM 실패: {fem['status'][:40]}")
@@ -584,12 +592,21 @@ class MainWindow(QMainWindow):
               "T_m2_ratio": v["T_m2"] / v["T_m"],
               "W_t": v["W_t"] * 1e3, "MagnetR": v["MagnetR"] * 1e3}
 
+        dataset, surro = self._dataset_paths()
+
         def job(log):
-            import torch
+            try:
+                import torch
+            except ImportError:
+                log("⚠ torch 미설치 — venv에서 'pip install torch' 후 사용 가능")
+                return None
+            if not os.path.exists(surro):
+                log("⚠ 서로게이트 없음 — 액티브러닝 1라운드를 먼저 실행하세요")
+                return None
             from motoropt.doe import BOUNDS
             from motoropt.objective import SurrogateObjective
             from motoropt.rl_opt import DesignEnv, SAC
-            obj = SurrogateObjective("surrogate.joblib", BOUNDS)
+            obj = SurrogateObjective(surro, BOUNDS)
             env = DesignEnv(obj)
             env.reset()
             env.u = np.array([(x0[k] - BOUNDS[k][0])
@@ -598,9 +615,14 @@ class MainWindow(QMainWindow):
             env.D = float(obj.D(env.u)[0])
             log(f"시작 D={env.D:.4f}")
             agent = SAC(env.dim + 1, env.dim)
-            if os.path.exists("sac_actor.pt"):
-                agent.actor.load_state_dict(torch.load("sac_actor.pt"))
+            actor_pt = os.path.join(_ROOT, "sac_actor.pt")
+            if os.path.exists(actor_pt):
+                agent.actor.load_state_dict(torch.load(actor_pt))
                 log("학습된 SAC 정책 로드")
+            else:
+                log("⚠ 학습된 정책(sac_actor.pt) 없음 — 무작위 초기 정책으로 "
+                    "동작해 개선 효과가 없습니다. SAC 학습(P6) 후 사용 권장, "
+                    "단발 최적화는 액티브러닝 버튼이 더 정확합니다.")
             s = env._obs()
             for t in range(env.h):
                 s, _, _ = env.step(agent.act(s, deterministic=True))
@@ -694,6 +716,21 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(f"내보내기 완료: {dst}")
 
     # ----------------------------------------------------------- 공용
+    _DESIGN_400W = "4. 400W_BasicModel_Load_Optimized"
+
+    def _dataset_paths(self):
+        """모델별 DOE 데이터셋·서로게이트 경로 (프로젝트 루트 기준).
+
+        실행 위치(cwd)와 무관해야 하고, 모델이 다르면 400W DOE 데이터에
+        다른 모델 결과가 섞이지 않도록 설계명별 파일로 분리한다."""
+        design = (self.model or {}).get("design_name", "") or "unknown"
+        if design == self._DESIGN_400W:
+            return (os.path.join(_ROOT, "doe_results.jsonl"),
+                    os.path.join(_ROOT, "surrogate.joblib"))
+        tag = re.sub(r"[^\w]+", "_", design).strip("_")
+        return (os.path.join(_ROOT, f"doe_{tag}.jsonl"),
+                os.path.join(_ROOT, f"surrogate_{tag}.joblib"))
+
     def _spawn(self, job, log_slot, done_slot):
         wk = Worker(job)
         wk.log.connect(log_slot)

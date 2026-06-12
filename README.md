@@ -42,6 +42,16 @@ Ansys Maxwell 2D 트랜션트 해석을 Python으로 재현하고, 그 위에
 - **T_avg R²=0.988(0.4%) · EMF R²=0.994(0.3%) · magnet_area R²=1.0** → P6 최적화 목적함수 확보
 - ripple/B_tooth는 경량평가 노이즈로 학습 불가 → P6에서 FEM 검증 루프 담당(액티브러닝)으로 처리
 
+### 내전형 안정화 — 회귀 하네스 (2026-06-12)
+- `scripts/run_regression.py`: 폴더 내 전 aedt 일괄 검증
+  (파싱→형상→메시→무부하 솔브→γ캘리브레이션→부하 스윕→손실·효율)
+- **내전형 7종 전부 PASS** (400W·750W/1200W·InnerType_KRO80·InwheelMotor·
+  SH_25_32·QDD_14_17·QDD_20), 외전형 2종(X12·OuterType_KRO80)은 명확한
+  안내와 함께 차단 — 외전형 지원은 추후 작업
+- GUI Optimize: DOE/서로게이트 경로를 프로젝트 루트 기준으로 고정(cwd 무관),
+  모델별 데이터셋 분리(doe_<설계명>.jsonl) — 400W 외 모델은 DOE 선행 안내
+- 상저항: motoropt/winding.py MLT식 (Motor-CAD 검증, 400W +0.9%)
+
 ### P4 확장 v2 검증 — 손실·효율 (PDF Rev1 p.7 대조, 2026-06-12)
 - 400W(4500rpm/4.9A): **T_avg 874.4 mNm(+2.9%) · P_fe 11.8 W(Maxwell 15.8, −25%)
   · η 94.2%(자석손 2.2W 가산; Maxwell 93.1)** — scripts/run_400w_loss.py
