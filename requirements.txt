@@ -3,3 +3,7 @@ scipy
 shapely>=2.0
 triangle
 matplotlib
+PyQt6
+scikit-learn
+joblib
+torch          # SAC 정책 기능용 (없어도 해석·최적화 DE는 동작)
