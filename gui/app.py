@@ -334,15 +334,27 @@ class MainWindow(QMainWindow):
         self.sp_rph.setDecimals(1); self.sp_rph.setValue(0.0)
         self.sp_nstep = QDoubleSpinBox(); self.sp_nstep.setRange(6, 120)
         self.sp_nstep.setDecimals(0); self.sp_nstep.setValue(36)
+        self.sp_dcu = QDoubleSpinBox(); self.sp_dcu.setRange(0.01, 5)
+        self.sp_dcu.setDecimals(3); self.sp_dcu.setValue(0.3)
+        self.sp_strands = QDoubleSpinBox(); self.sp_strands.setRange(1, 200)
+        self.sp_strands.setDecimals(0); self.sp_strands.setValue(11)
+        self.sp_tcu = QDoubleSpinBox(); self.sp_tcu.setRange(-40, 250)
+        self.sp_tcu.setDecimals(0); self.sp_tcu.setValue(80)
         for col, (lbl, w_) in enumerate(
                 [("속도 [rpm]", self.sp_rpm), ("상전류 [Arms]", self.sp_irms),
-                 ("상저항 [mΩ] (0=추정⚠)", self.sp_rph),
+                 ("상저항 [mΩ] (0=MLT 계산)", self.sp_rph),
                  ("스텝", self.sp_nstep)]):
             g.addWidget(QLabel(lbl), 0, col)
             g.addWidget(w_, 1, col)
+        for col, (lbl, w_) in enumerate(
+                [("나동선 지름 [mm]", self.sp_dcu),
+                 ("가닥수", self.sp_strands),
+                 ("권선온도 [°C]", self.sp_tcu)]):
+            g.addWidget(QLabel(lbl), 2, col)
+            g.addWidget(w_, 3, col)
         b3 = QPushButton("▶ 부하 스윕 실행 (γ 캘리브레이션 포함 — 수 분 소요)")
         b3.clicked.connect(self.run_load_sweep)
-        g.addWidget(b3, 2, 0, 1, 4)
+        g.addWidget(b3, 4, 0, 1, 4)
         left.addWidget(grp)
         self.log_solve = QPlainTextEdit(); self.log_solve.setReadOnly(True)
         left.addWidget(self.log_solve, 1)
@@ -413,8 +425,11 @@ class MainWindow(QMainWindow):
         model, style, raw = self.model, self.style, self.current_raw()
         rpm = float(self.sp_rpm.value())
         irms = float(self.sp_irms.value())
-        rph = float(self.sp_rph.value()) * 1e-3 or None    # mΩ → Ω, 0=추정
+        rph = float(self.sp_rph.value()) * 1e-3 or None    # mΩ → Ω, 0=MLT 계산
         nstep = int(self.sp_nstep.value())
+        d_cu = float(self.sp_dcu.value())
+        strands = int(self.sp_strands.value())
+        tcu = float(self.sp_tcu.value())
 
         def job(log):
             from motoropt.expressions import resolve_variables
@@ -427,6 +442,15 @@ class MainWindow(QMainWindow):
             steel, magnet = detect_material_names(m2)
             ini = math.degrees(v.get("ini_pos", 0.0))
             log(f"재질: 강판={steel} / 자석={magnet}")
+            R_in = rph
+            if R_in is None:
+                from motoropt.winding import phase_resistance
+                w = phase_resistance(v, d_cu_mm=d_cu, strands=strands,
+                                     T_cu_C=tcu)
+                R_in = w["R_ph"]
+                log(f"R_ph(MLT 계산) = {R_in*1e3:.1f} mΩ "
+                    f"(MLT {w['MLT_mm']:.1f} mm, 직렬 {w['n_series']:.0f}턴, "
+                    f"도체 {w['turn_csa_mm2']:.3f} mm², {tcu:.0f}°C)")
             log("γ 캘리브레이션 (4점 프로브 × 6스텝)...")
             cal = calibrate_gamma(m2, style, rpm=rpm, I_rms=irms,
                                   n_steps=6, init_pos_deg=ini)
@@ -437,8 +461,8 @@ class MainWindow(QMainWindow):
                                         gamma_deg=cal["gamma_max_deg"],
                                         n_steps=nstep, init_pos_deg=ini,
                                         steel_name=steel, magnet_name=magnet)
-            r = compute_responses(sw, m2, R_ph_ohm=rph)
-            warn = " ⚠기하추정(엔드와인딩 미포함)" if r["R_ph_estimated"] else ""
+            r = compute_responses(sw, m2, R_ph_ohm=R_in)
+            warn = "" if rph else " (MLT 계산)"
             log(f"── 응답 ──\n"
                 f"T_avg       {r['T_avg']:.4f} N·m\n"
                 f"ripple_pct  {r['T_ripple_pct']:.2f} %  "
