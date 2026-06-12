@@ -77,6 +77,10 @@ class PMLinear:
             dB = arr[i0, 1] - arr[i1, 1]
             dH = arr[i0, 0] - arr[i1, 0]
             self.mu_rec = float(dB / dH / MU0)
+            # 고유(intrinsic) J-H 곡선 감지: 무릎 전 평탄 → 기울기≈0.
+            # 노멀 곡선 B=J+μ0H 이므로 μ_rec(normal)=μ_rec(intr)+1.
+            if self.mu_rec < 0.5:
+                self.mu_rec += 1.0
         else:
             self.Br, self.mu_rec = br, mu_rec
         self.nu = 1.0 / (MU0 * self.mu_rec)

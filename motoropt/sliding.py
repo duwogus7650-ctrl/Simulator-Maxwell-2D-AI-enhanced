@@ -21,9 +21,17 @@ from .geometry import MotorGeometry, _arc
 from .meshing import H_DEFAULT, _h_to_area
 
 
-def _pslg_from_lines(lines):
+def _pslg_from_lines(lines, seg_tol: float = 0.0, face_tol: float = 1e-7):
+    """배치(arrangement) → PSLG.
+
+    seg_tol [mm]: 이보다 짧은 세그먼트는 제거 — 부동소수 노이즈로 생긴
+    µm급 미세 변이 품질(q) 세분화를 연쇄 유발해 메시가 폭주하는 것을
+    차단한다(모터 스케일에서 2µm 미만의 의도적 형상은 없음).
+    face_tol [mm²]: 슬리버 면 제거 — 미세 변 제거로 경계가 열리며
+    이웃 면에 자연 흡수된다.
+    """
     noded = shapely.union_all(lines, grid_size=1e-6)
-    faces = [f for f in polygonize(noded) if f.area > 1e-7]
+    faces = [f for f in polygonize(noded) if f.area > face_tol]
     pts, V, S, seen = {}, [], [], set()
 
     def vid(x, y):
@@ -33,10 +41,13 @@ def _pslg_from_lines(lines):
             V.append(k)
         return pts[k]
 
+    tol2 = seg_tol * seg_tol
     geoms = noded.geoms if hasattr(noded, "geoms") else [noded]
     for ls in geoms:
         cs = list(ls.coords)
         for a, b in zip(cs[:-1], cs[1:]):
+            if tol2 > 0 and (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 < tol2:
+                continue                          # 미세 세그먼트 스킵(기본 꺼짐)
             ia, ib = vid(*a), vid(*b)
             if ia == ib:
                 continue
@@ -130,8 +141,12 @@ class SlidingBandMesh:
         # ---- 스테이터측 메시 (1회) -------------------------------------
         lines_out = []
         self._add(lines_out, geo.stator)
+        from .meshing import weld_boundary
+        _stb = geo.stator.boundary
         for c in geo.coils:
-            self._add(lines_out, c)
+            lines_out.append(LineString(weld_boundary(c.exterior.coords, _stb)))
+            for hole in c.interiors:
+                lines_out.append(LineString(weld_boundary(hole.coords, _stb)))
         co = _uniform_circle_pts(self.r_o, n_band)
         lines_out.append(LineString(np.vstack([co, co[:1]])))
         lines_out.append(LineString(_arc(geo.region_radius, 0, 2 * math.pi, 192)))

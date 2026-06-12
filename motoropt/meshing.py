@@ -32,6 +32,40 @@ H_DEFAULT = {
 }
 
 
+def weld_boundary(coords, target_boundary, tol: float = 1e-4):
+    """coords의 각 점이 target_boundary에서 (0, tol)mm 떠 있으면 투영해 용접.
+
+    형상 생성기의 부동소수 드리프트로 인터페이스 꼭짓점이 ~1e-7mm
+    비공선이 되면 노딩 시 극소각이 생겨 품질(q) 세분화가 폭주한다
+    (QDD-20에서 코일↔슬롯벽 1e-7mm 어긋남 → 1800만 요소 재현).
+    노딩 전에 정확히 경계 위로 붙여 차단한다.
+    """
+    import numpy as np
+    from shapely.geometry import Point
+    # 경계 꼭짓점 목록 (꼭짓점 스냅용 — 투영점이 기존 꼭짓점 근처면
+    # 그 꼭짓점으로 정확히 스냅해 µm급 신규 세그먼트 생성을 방지)
+    tv = []
+    geoms = target_boundary.geoms if hasattr(target_boundary, "geoms") \
+        else [target_boundary]
+    for g in geoms:
+        tv.extend(g.coords)
+    tv = np.asarray(tv, float)
+    out = []
+    for x, y in coords:
+        d = target_boundary.distance(Point(x, y))
+        if 1e-12 < d < tol:
+            q = target_boundary.interpolate(target_boundary.project(Point(x, y)))
+            dv = np.hypot(tv[:, 0] - q.x, tv[:, 1] - q.y)
+            k = int(dv.argmin())
+            if dv[k] < tol:
+                out.append((float(tv[k, 0]), float(tv[k, 1])))
+            else:
+                out.append((q.x, q.y))
+        else:
+            out.append((x, y))
+    return out
+
+
 def _h_to_area(h: float) -> float:
     return (math.sqrt(3) / 4.0) * h * h
 
@@ -56,8 +90,11 @@ def build_mesh(geo: MotorGeometry, h: Dict[str, float] | None = None,
     add_boundary(geo.stator)
     for poly, _, _ in geo.magnets:
         add_boundary(poly)
+    _stb = geo.stator.boundary
     for c in geo.coils:
-        add_boundary(c)
+        lines.append(LineString(weld_boundary(c.exterior.coords, _stb)))
+        for hole in c.interiors:
+            lines.append(LineString(weld_boundary(hole.coords, _stb)))
     lines.append(LineString(_arc(geo.band_radius, 0, 2 * math.pi, 256)))
     lines.append(LineString(_arc(geo.region_radius, 0, 2 * math.pi, 192)))
 
