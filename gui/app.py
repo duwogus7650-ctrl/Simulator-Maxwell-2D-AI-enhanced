@@ -67,7 +67,7 @@ from matplotlib.figure import Figure
 DESIGN_VARS = ["a_m", "T_m", "T_m2", "W_t", "MagnetR"]
 
 OBJ_UNITS = {"T_avg": "mNm", "emf_rms": "V", "magnet_area": "mm²",
-             "ripple_pct": "%", "efficiency": "0~1"}
+             "ripple_pct": "%", "efficiency": "0~1", "cogging_pp": "mNm"}
 
 
 def _obj_key(text: str) -> str:
@@ -690,11 +690,13 @@ class MainWindow(QMainWindow):
             self.log_opt.appendPlainText(i_note)
         dataset, _ = self._dataset_paths()
         meta_path = dataset[:-6] + ".meta.json"          # .jsonl → .meta.json
-        # efficiency가 목표에 있으면 DOE도 효율 포함 평가(느림) — Solve 운전조건
+        # efficiency·cogging이 목표에 있으면 DOE도 해당 평가 추가(느림)
         try:
-            want_eff = "efficiency" in self._spec_from_table()
+            _spec = self._spec_from_table()
+            want_eff = "efficiency" in _spec
+            want_cog = "cogging_pp" in _spec
         except ValueError:
-            want_eff = False
+            want_eff = want_cog = False
         rpm = float(self.sp_rpm.value())
         d_cu = float(self.sp_dcu.value())
         strands = int(self.sp_strands.value())
@@ -740,10 +742,14 @@ class MainWindow(QMainWindow):
             designs = [d for d in designs
                        if tuple(round(val, 6) for val in d.values())
                        not in done]
-            per = 90 if want_eff else 20
+            per = (66 if want_eff else 20) + (16 if want_cog else 0)
             if want_eff:
-                log("ℹ 효율 포함 평가 — 설계당 ~90초(부하스윕). DE 탐색이 "
+                log("ℹ 효율 포함 평가 — 설계당 ~66초(부하스윕). DE 탐색이 "
                     "효율도 직접 최적화하게 됩니다.")
+            if want_cog:
+                log("ℹ 코깅 포함 평가 — 설계당 +~16초(무부하 1주기 16점). "
+                    "⚠ 코깅은 노이즈 큰 미소토크라 서로게이트 학습성은 낮을 수 "
+                    "있음 — 후보 FEM검증으로 확인 권장.")
             log(f"평가할 설계 {len(designs)}개 (기존 {len(done)}개 스킵) — "
                 f"예상 {len(designs)*per//60}분")
             t0 = time.time()
@@ -753,7 +759,8 @@ class MainWindow(QMainWindow):
                     r = evaluate_design(model, style, x, I_rms=irms,
                                         delta_e_deg=delta, steel_name=steel,
                                         magnet_name=mag,
-                                        with_efficiency=want_eff, rpm=rpm,
+                                        with_efficiency=want_eff,
+                                        with_cogging=want_cog, rpm=rpm,
                                         d_cu_mm=d_cu, strands=strands,
                                         T_cu_C=tcu, R_ph_ohm=rph)
                     f.write(json.dumps(r) + "\n"); f.flush()
@@ -872,6 +879,7 @@ class MainWindow(QMainWindow):
         bounds, delta, irms = self._load_meta()
         # 효율이 목표에 있으면 부하 스윕까지 평가 — Solve 탭 운전조건 사용
         want_eff = "efficiency" in spec
+        want_cog = "cogging_pp" in spec
         rpm = float(self.sp_rpm.value())
         d_cu = float(self.sp_dcu.value())
         strands = int(self.sp_strands.value())
@@ -916,6 +924,7 @@ class MainWindow(QMainWindow):
             log(f"서로게이트 D={-r.fun:.4f} → FEM 검증 중 (~30초{eta_note})...")
             fem = evaluate_design(model, style, xd, I_rms=irms or None,
                                   delta_e_deg=delta, with_efficiency=want_eff,
+                                  with_cogging=want_cog,
                                   rpm=rpm, d_cu_mm=d_cu, strands=strands,
                                   T_cu_C=tcu, R_ph_ohm=rph)
             with open(dataset, "a") as f:

@@ -38,6 +38,7 @@ SPEC = {
 SPEC_EXTRA = {
     "ripple_pct": ("smaller", 1.0, 5.0),
     "efficiency": ("larger", 0.90, 0.95),
+    "cogging_pp": ("smaller", 5.0, 30.0),   # mNm, 모델별로 L/U 조정 권장
 }
 
 _D_FUNCS = {"larger": d_larger, "smaller": d_smaller, "target": d_target}

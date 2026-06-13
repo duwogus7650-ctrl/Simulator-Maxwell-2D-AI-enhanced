@@ -13,8 +13,8 @@ import numpy as np
 
 X_KEYS = ["a_m", "T_m", "T_m2_ratio", "W_t", "MagnetR"]
 Y_KEYS = ["T_avg", "emf_rms", "ripple_pct", "B_tooth", "magnet_area"]
-# 데이터셋에 있으면 추가로 학습하는 옵션 응답 (with_efficiency DOE)
-Y_KEYS_OPT = ["efficiency"]
+# 데이터셋에 있으면 추가로 학습하는 옵션 응답 (with_efficiency·with_cogging DOE)
+Y_KEYS_OPT = ["efficiency", "cogging_pp"]
 
 
 def dataset_y_keys(rows) -> list:

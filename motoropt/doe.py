@@ -117,6 +117,8 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
                     steel_name: str | None = None,
                     magnet_name: str | None = None,
                     with_efficiency: bool = False,
+                    with_cogging: bool = False,
+                    n_cog: int = 16,
                     rpm: float | None = None,
                     d_cu_mm: float = 0.25,
                     strands: int = 11,
@@ -218,6 +220,21 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
             (Tvw.max() - Tvw.min()) / np.mean(Tvw) * 100)   # 참고용
         out["B_tooth"] = Bt
         out["magnet_area"] = float(sum(p.area for p, _, _ in geo.magnets))
+
+        # ---- (옵션) 코깅: 무부하 코깅 1주기 pk-pk -----------------------
+        # 코깅 기본주기(기계각) = 360/LCM(슬롯,극). 슬라이딩밴드가 위치 간
+        # 메시 위상을 맞춰 한 설계 내 노이즈는 작지만, 설계 간 재메싱 노이즈는
+        # 남아 서로게이트 학습성은 검증 필요(리플처럼 노이즈 한계 가능).
+        if with_cogging:
+            npole = int(round(v["N_pole"]))
+            cog_period = 360.0 / int(np.lcm(n_slot, npole))
+            Tc = []
+            for a in np.linspace(0, cog_period, n_cog, endpoint=False):
+                sc, rc, _ = solve(a, False)
+                Tc.append(torque_arkkio(sc, rc, sbm.r_i + 0.005,
+                                        sbm.r_o - 0.005, L))
+            Tc = np.asarray(Tc)
+            out["cogging_pp"] = float((Tc.max() - Tc.min()) * 1e3)   # mNm
 
         # ---- (옵션) 효율: 검증된 전기1주기 스윕 + 손실 ------------------
         if with_efficiency:
