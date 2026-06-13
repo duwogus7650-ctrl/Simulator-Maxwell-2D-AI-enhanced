@@ -24,7 +24,7 @@ import numpy as np
 from .geometry import build_motor
 from .sliding import SlidingBandMesh
 from .solver_ms import Magnetostatic2D
-from .postproc import torque_arkkio, build_winding_map
+from .postproc import torque_arkkio, build_winding_map, coenergy
 from .coreloss import core_loss, copper_loss_dc
 
 
@@ -37,6 +37,7 @@ def sweep_load_with_fields(model: dict, style: str, *,
                            n_band: int = 2880,
                            steel_name: str | None = None,
                            magnet_name: str | None = None,
+                           compute_vw: bool = True,
                            verbose: bool = False) -> dict:
     """전기 1주기 부하 스윕 — 토크 시계열 + 강 요소 B(t) 수집."""
     v = model["variables"]
@@ -64,7 +65,9 @@ def sweep_load_with_fields(model: dict, style: str, *,
     I_pk = math.sqrt(2.0) * I_rms
     g_rad = math.radians(gamma_deg)
 
-    torque = np.empty(n_steps)
+    torque = np.empty(n_steps)            # Arkkio (리플 파형용)
+    torque_vw = np.empty(n_steps)         # 가상일 coenergy (정확 평균용)
+    d_vw_deg = 0.25                       # 가상일 dθ 섭동 [기계각 °]
     lam = {ph: np.empty(n_steps) for ph in "ABC"}
     sel_st = sel_rt = None
     Bx_st = By_st = Bx_rt = By_rt = None
@@ -100,6 +103,18 @@ def sweep_load_with_fields(model: dict, style: str, *,
         res = s.solve()
 
         torque[i] = torque_arkkio(s, res, r_mag + 0.03, r_bore - 0.03, L)
+        # 가상일 토크: 전류 고정·로터만 Δθ 회전 → T = dW_co/dθ (전진차분).
+        # Arkkio는 메시·적분반경에 따라 ±수% 바이어스가 있어, 절대 평균토크는
+        # 가상일이 더 정확(400W 가상일 +1.0% vs Arkkio +8% 검증).
+        if compute_vw:
+            W0 = coenergy(s, res, L)
+            s2 = Magnetostatic2D(band.merge(ang + d_vw_deg),
+                                 model["materials"], steel_name, magnet_name)
+            s2.set_coil_currents(cur)
+            res2 = s2.solve()
+            torque_vw[i] = (coenergy(s2, res2, L) - W0) / math.radians(d_vw_deg)
+        else:
+            torque_vw[i] = torque[i]      # 캘리브레이션 등 각도탐색엔 불필요
         from .postproc import flux_linkages
         for ph, val in flux_linkages(s, res, wmap, Zc=Zc, L_stk_m=L).items():
             lam[ph][i] = val
@@ -116,7 +131,7 @@ def sweep_load_with_fields(model: dict, style: str, *,
                   f"T={torque[i]:8.4f} N·m  NR={res.iterations} "
                   f"res={res.residual:.2e}")
 
-    return {"torque": torque, "lam": lam,
+    return {"torque": torque, "torque_vw": torque_vw, "lam": lam,
             "Bx_st": Bx_st, "By_st": By_st, "areas_st": areas_st,
             "Bx_rt": Bx_rt, "By_rt": By_rt, "areas_rt": areas_rt,
             "rpm": rpm, "I_rms": I_rms, "pp": pp, "L_stk": L,
@@ -162,9 +177,11 @@ def compute_responses(sw: dict, model: dict, *,
                         L_stk_m=sw["L_stk"], L_end_m=L_end_m,
                         fill_factor=fill_factor, temp_C=temp_C)
 
-    T = sw["torque"]
-    T_avg = float(T.mean())
-    T_pp = float(T.max() - T.min())
+    T = sw["torque"]                               # Arkkio (리플 파형)
+    T_vw = sw.get("torque_vw", T)                  # 가상일 (정확 평균)
+    T_avg = float(T_vw.mean())                     # ← 평균토크는 가상일
+    T_avg_arkkio = float(T.mean())
+    T_pp = float(T.max() - T.min())                # 리플 진폭은 Arkkio 파형에서
     w_m = sw["rpm"] * 2 * math.pi / 60.0
     P_out = T_avg * w_m
     P_fe = fe_st.P_total + fe_rt.P_total
@@ -173,6 +190,7 @@ def compute_responses(sw: dict, model: dict, *,
 
     return {
         "T_avg": T_avg,
+        "T_avg_arkkio": T_avg_arkkio,
         "T_ripple_pp": T_pp,
         "T_ripple_pct": 100.0 * T_pp / abs(T_avg) if T_avg else float("inf"),
         "P_out": P_out,
@@ -202,7 +220,8 @@ def calibrate_gamma(model: dict, style: str, *, rpm: float, I_rms: float,
     for g in (0.0, 90.0, 180.0, 270.0):
         sw = sweep_load_with_fields(model, style, rpm=rpm, I_rms=I_rms,
                                     gamma_deg=g, n_steps=n_steps,
-                                    init_pos_deg=init_pos_deg, h=h)
+                                    init_pos_deg=init_pos_deg, h=h,
+                                    compute_vw=False)
         T[g] = float(sw["torque"].mean())
     A = (T[90.0] - T[270.0]) / 2.0
     B = (T[0.0] - T[180.0]) / 2.0

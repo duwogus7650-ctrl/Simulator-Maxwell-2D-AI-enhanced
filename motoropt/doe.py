@@ -231,7 +231,7 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
                     m2, style, rpm=rpm_use, I_rms=Irms_ph,
                     gamma_deg=cal["gamma_max_deg"], n_steps=36,
                     init_pos_deg=ini, steel_name=steel_name,
-                    magnet_name=magnet_name)
+                    magnet_name=magnet_name, compute_vw=False)  # DOE는 기존동작 유지(빠르게)
                 rph = R_ph_ohm
                 if not rph or rph <= 0:
                     rph = phase_resistance(v, d_cu_mm=d_cu_mm, strands=strands,

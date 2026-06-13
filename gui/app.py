@@ -566,7 +566,8 @@ class MainWindow(QMainWindow):
             r = compute_responses(sw, m2, R_ph_ohm=R_in)
             warn = "" if rph else " (MLT 계산)"
             log(f"── 응답 ──\n"
-                f"T_avg       {r['T_avg']:.4f} N·m\n"
+                f"T_avg       {r['T_avg']:.4f} N·m (가상일·정확, Maxwell 비교용)"
+                f"  [Arkkio {r.get('T_avg_arkkio', r['T_avg']):.4f}]\n"
                 f"ripple_pct  {r['T_ripple_pct']:.2f} %  "
                 f"({r['T_ripple_pp']*1e3:.1f} mNm pp, Arkkio)\n"
                 f"P_fe        {r['P_fe']:.2f} W "
