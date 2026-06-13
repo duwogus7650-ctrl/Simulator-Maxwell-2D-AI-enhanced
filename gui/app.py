@@ -176,9 +176,29 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"로드 실패: {os.path.basename(path)}")
             _error_dialog(self, "aedt 열기 실패", e)
 
+    def _reset_model_state(self):
+        """모델 전환 시 이전 모델의 해석·최적화 결과를 모두 비운다 —
+        다른 aedt를 열었는데 직전 모델 결과가 남는 것 방지."""
+        self.candidates = []
+        for tbl in (getattr(self, "tbl_cand", None),
+                    getattr(self, "tbl_res", None)):
+            if tbl is not None:
+                tbl.setRowCount(0)
+        for fig, cv in ((getattr(self, "fig_field", None),
+                         getattr(self, "cv_field", None)),
+                        (getattr(self, "fig_res", None),
+                         getattr(self, "cv_res", None))):
+            if fig is not None and cv is not None:
+                fig.clear(); cv.draw()
+        for log in (getattr(self, "log_solve", None),
+                    getattr(self, "log_opt", None)):
+            if log is not None:
+                log.clear()
+
     def _load_aedt(self, path):
         from motoropt.aedt_parser import parse_aedt, detect_magnet_style
         self.model = parse_aedt(path)
+        self._reset_model_state()           # 직전 모델 결과 비우기
         self.style = detect_magnet_style(self.model)
         self.aedt_path = path
         self.lbl_model.setText(
@@ -1024,17 +1044,20 @@ class MainWindow(QMainWindow):
     _DESIGN_400W = "4. 400W_BasicModel_Load_Optimized"
 
     def _dataset_paths(self):
-        """모델별 DOE 데이터셋·서로게이트 경로 (프로젝트 루트 기준).
+        """모델별·운전전류별 DOE 데이터셋·서로게이트 경로 (루트 기준).
 
-        실행 위치(cwd)와 무관해야 하고, 모델이 다르면 400W DOE 데이터에
-        다른 모델 결과가 섞이지 않도록 설계명별 파일로 분리한다."""
+        실행 위치(cwd)와 무관해야 하고 ① 모델이 다르면 설계명으로,
+        ② 운전점이 다르면 상전류로 파일을 분리한다 — 다른 aedt나 다른
+        전류(피크/정격)의 결과가 절대 섞이지 않도록. 400W는 레거시 유지."""
         design = (self.model or {}).get("design_name", "") or "unknown"
         if design == self._DESIGN_400W:
             return (os.path.join(_ROOT, "doe_results.jsonl"),
                     os.path.join(_ROOT, "surrogate.joblib"))
         tag = re.sub(r"[^\w]+", "_", design).strip("_")
-        return (os.path.join(_ROOT, f"doe_{tag}.jsonl"),
-                os.path.join(_ROOT, f"surrogate_{tag}.joblib"))
+        iph = self._phase_current()[0] if hasattr(self, "sp_irms") else 0.0
+        cur = f"_{iph:.1f}A" if iph > 0 else ""
+        return (os.path.join(_ROOT, f"doe_{tag}{cur}.jsonl"),
+                os.path.join(_ROOT, f"surrogate_{tag}{cur}.joblib"))
 
     def _spawn(self, job, log_slot, done_slot):
         wk = Worker(job)
