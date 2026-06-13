@@ -195,6 +195,8 @@ class MainWindow(QMainWindow):
             self.sp_rpm.setValue(float(v["BaseRPM"]))
         if v.get("I_rms"):
             self.sp_irms.setValue(float(v["I_rms"]))
+        if not self._autofill_spec_from_dataset():
+            self._reset_spec_defaults()        # 메타 없으면 기본값 복원
         self._refresh_geometry()
         self.statusBar().showMessage(f"{os.path.basename(path)} 로드 완료")
 
@@ -612,7 +614,66 @@ class MainWindow(QMainWindow):
                 "실행하세요.")
             return None
 
-        self._spawn(job, self.log_opt.appendPlainText, lambda *_: None)
+        self._spawn(job, self.log_opt.appendPlainText, self._doe_done)
+
+    def _doe_done(self, _):
+        if self._autofill_spec_from_dataset():
+            self.log_opt.appendPlainText(
+                "ℹ Objective 목표값을 이 모델의 기준 설계 성능으로 갱신했습니다 "
+                "(Objective 탭에서 확인·수정 가능)")
+
+    def _set_obj_row(self, key: str, spec: tuple):
+        for i in range(self.tbl_obj.rowCount()):
+            if self.tbl_obj.item(i, 1).text().strip() != key:
+                continue
+            self.tbl_obj.cellWidget(i, 2).setCurrentText(spec[0])
+            vals = ({3: spec[1], 4: spec[2], 5: spec[3]}
+                    if spec[0] == "target" else {3: spec[1], 5: spec[2]})
+            for c in (3, 4, 5):
+                self.tbl_obj.setItem(i, c, QTableWidgetItem(
+                    f"{vals[c]:.4g}" if c in vals else ""))
+            return
+
+    def _reset_spec_defaults(self):
+        from motoropt.objective import SPEC, SPEC_EXTRA
+        for k, s in {**SPEC, **SPEC_EXTRA}.items():
+            self._set_obj_row(k, s)
+
+    def _autofill_spec_from_dataset(self) -> bool:
+        """DOE 기준 설계(첫 샘플) 성능 → Objective 테이블 L/T/U 자동 설정.
+
+        메타파일이 있는(=GUI DOE로 만든) 모델만 — 400W의 수동 튜닝값은 유지.
+        T_avg: 기준 유지(L=기준, U=+3%) / emf_rms: 기준±5% /
+        magnet_area: 절감(L=-26%, U=기준)."""
+        if self.model is None:
+            return False
+        dataset, _ = self._dataset_paths()
+        meta_path = dataset[:-6] + ".meta.json"
+        if not (os.path.exists(meta_path) and os.path.exists(dataset)):
+            return False
+        from motoropt.doe import baseline_design
+        base = {k: round(v_, 6) for k, v_
+                in baseline_design(self.model["variables"]).items()}
+        row = None
+        with open(dataset, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                if r.get("status") != "ok":
+                    continue
+                if {k: round(v_, 6) for k, v_ in r["x"].items()} == base:
+                    row = r
+                    break
+                row = row or r                     # 기준 없으면 첫 유효 행
+        if row is None:
+            return False
+        T0, E0, A0 = row["T_avg"], row["emf_rms"], row["magnet_area"]
+        self._set_obj_row("T_avg", ("larger", T0, T0 * 1.03))
+        self._set_obj_row("emf_rms", ("target", E0 * 0.95, E0, E0 * 1.05))
+        self._set_obj_row("magnet_area", ("smaller", A0 * 0.74, A0))
+        return True
 
     def _load_meta(self):
         """DOE 메타(bounds·δ·전류) — 없으면 400W 레거시 기본값."""
