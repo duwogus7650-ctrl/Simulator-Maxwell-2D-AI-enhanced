@@ -66,6 +66,14 @@ from matplotlib.figure import Figure
 
 DESIGN_VARS = ["a_m", "T_m", "T_m2", "W_t", "MagnetR"]
 
+OBJ_UNITS = {"T_avg": "mNm", "emf_rms": "V", "magnet_area": "mm²",
+             "ripple_pct": "%", "efficiency": "0~1"}
+
+
+def _obj_key(text: str) -> str:
+    """테이블 표시명 'T_avg [mNm]' → 응답 키 'T_avg'."""
+    return text.split(" [")[0].strip()
+
 
 def _error_dialog(parent, title: str, exc: BaseException):
     """예외 → 사용자 안내 다이얼로그. PyQt6는 슬롯 내 미처리 예외 시
@@ -274,7 +282,8 @@ class MainWindow(QMainWindow):
             chk.setCheckState(Qt.CheckState.Checked if on
                               else Qt.CheckState.Unchecked)
             self.tbl_obj.setItem(i, 0, chk)
-            name = QTableWidgetItem(k)
+            name = QTableWidgetItem(
+                f"{k} [{OBJ_UNITS[k]}]" if k in OBJ_UNITS else k)
             name.setFlags(name.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.tbl_obj.setItem(i, 1, name)
             cb = QComboBox(); cb.addItems(["larger", "smaller", "target"])
@@ -306,7 +315,7 @@ class MainWindow(QMainWindow):
         for i in range(self.tbl_obj.rowCount()):
             if self.tbl_obj.item(i, 0).checkState() != Qt.CheckState.Checked:
                 continue
-            k = self.tbl_obj.item(i, 1).text().strip()
+            k = _obj_key(self.tbl_obj.item(i, 1).text())
             typ = self.tbl_obj.cellWidget(i, 2).currentText()
             try:
                 L = float(self.tbl_obj.item(i, 3).text())
@@ -327,7 +336,7 @@ class MainWindow(QMainWindow):
         left = QVBoxLayout()
         b1 = QPushButton("▶ 무부하 해석 (코깅·EMF용 단일 포지션)")
         b1.clicked.connect(lambda: self.run_solve(load=False))
-        b2 = QPushButton("▶ 부하 해석 (정격 전류·MTPA)")
+        b2 = QPushButton("▶ 부하 해석 (입력 전류·MTPA)")
         b2.clicked.connect(lambda: self.run_solve(load=True))
         left.addWidget(b1); left.addWidget(b2)
 
@@ -364,9 +373,14 @@ class MainWindow(QMainWindow):
                  ("권선온도 [°C]", self.sp_tcu)]):
             g.addWidget(QLabel(lbl), 2, col)
             g.addWidget(w_, 3, col)
+        self.lbl_iconv = QLabel()
+        g.addWidget(self.lbl_iconv, 4, 0, 1, 4)
+        self.sp_irms.valueChanged.connect(self._update_iconv)
+        self.cb_ibase.currentIndexChanged.connect(self._update_iconv)
+        self._update_iconv()
         b3 = QPushButton("▶ 부하 스윕 실행 (γ 캘리브레이션 포함 — 수 분 소요)")
         b3.clicked.connect(self.run_load_sweep)
-        g.addWidget(b3, 4, 0, 1, 4)
+        g.addWidget(b3, 5, 0, 1, 4)
         left.addWidget(grp)
         self.log_solve = QPlainTextEdit(); self.log_solve.setReadOnly(True)
         left.addWidget(self.log_solve, 1)
@@ -383,6 +397,9 @@ class MainWindow(QMainWindow):
             self.log_solve.appendPlainText("⚠ 먼저 Model 탭에서 aedt를 여세요")
             return
         model, style, raw = self.model, self.style, self.current_raw()
+        irms_in, i_note = self._phase_current()
+        if load and i_note:
+            self.log_solve.appendPlainText(i_note)
 
         def job(log):
             from motoropt.expressions import resolve_variables
@@ -402,7 +419,7 @@ class MainWindow(QMainWindow):
                                 steel, magnet)
             if load:
                 wmap = build_winding_map(s)
-                Ia = v["I_rms"] * math.sqrt(2)
+                Ia = (irms_in or v["I_rms"]) * math.sqrt(2)
                 Zc = int(round(v["Zc"]))
                 te = math.radians(290.0)
                 iph = {"A": Ia * math.sin(te),
@@ -429,6 +446,13 @@ class MainWindow(QMainWindow):
             return s, res, met
 
         self._spawn(job, self.log_solve.appendPlainText, self._solve_done)
+
+    def _update_iconv(self):
+        """전류 입력/기준 변경 시 해석에 쓰일 상전류를 즉시 표시."""
+        I, note = self._phase_current()
+        self.lbl_iconv.setText(
+            f"→ 해석 상전류: <b>{I:.2f} Arms</b>"
+            + (f"  ({note})" if note else ""))
 
     def _phase_current(self) -> tuple:
         """전류 입력 + 기준 콤보 → (상전류 Arms, 환산 설명)."""
@@ -673,7 +697,7 @@ class MainWindow(QMainWindow):
 
     def _set_obj_row(self, key: str, spec: tuple):
         for i in range(self.tbl_obj.rowCount()):
-            if self.tbl_obj.item(i, 1).text().strip() != key:
+            if _obj_key(self.tbl_obj.item(i, 1).text()) != key:
                 continue
             self.tbl_obj.cellWidget(i, 2).setCurrentText(spec[0])
             vals = ({3: spec[1], 4: spec[2], 5: spec[3]}
