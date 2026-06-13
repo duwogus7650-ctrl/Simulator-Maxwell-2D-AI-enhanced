@@ -1,0 +1,4 @@
+# Windows 배치/스크립트는 CRLF로 — LF면 cmd가 '?명령' 파싱오류를 냄
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
