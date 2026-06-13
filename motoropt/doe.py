@@ -37,6 +37,67 @@ BOUNDS = {
 }
 
 
+def bounds_for_model(v: dict) -> dict:
+    """현재 설계값 기준 상대 범위 — 400W에서 기존 BOUNDS와 일치하도록 보정.
+
+    (T_m 2.2→1.80~2.60, W_t 3.5→3.00~4.20, MagnetR 0.8→0.40~1.10)
+    """
+    tm, wt, mr = v["T_m"] * 1e3, v["W_t"] * 1e3, v["MagnetR"] * 1e3
+    return {
+        "a_m":        (0.80, 0.95),
+        "T_m":        (round(tm * 0.818, 3), round(tm * 1.182, 3)),
+        "T_m2_ratio": (0.60, 0.92),
+        "W_t":        (round(wt * 0.857, 3), round(wt * 1.2, 3)),
+        "MagnetR":    (round(max(0.2, mr * 0.5), 3), round(mr * 1.375, 3)),
+    }
+
+
+def baseline_design(v: dict) -> Dict[str, float]:
+    """현재 변수의 설계점 (DOE 0번 샘플·SAC 시작점용)."""
+    return {"a_m": float(v["a_m"]), "T_m": v["T_m"] * 1e3,
+            "T_m2_ratio": float(v["T_m2"] / v["T_m"]),
+            "W_t": v["W_t"] * 1e3, "MagnetR": v["MagnetR"] * 1e3}
+
+
+def calibrate_delta(model: dict, style: str, *, I_rms: float,
+                    steel_name: str | None = None,
+                    magnet_name: str | None = None,
+                    n_band: int = 2880) -> float:
+    """DOE 전류각 δ* 캘리브레이션 (로터 0° 고정, 4점 사인 피팅).
+
+    evaluate_design과 동일 컨벤션(te = pp·θ + δ)을 쓴다."""
+    from .aedt_parser import detect_material_names
+    if steel_name is None or magnet_name is None:
+        steel_name, magnet_name = detect_material_names(model)
+    v = model["variables"]
+    geo = build_motor(v, style)
+    sbm = SlidingBandMesh(geo, n_band=n_band)
+    mesh = sbm.merge(0.0)
+    L = v["L_stk"]
+    Zc = int(round(v["Zc"]))
+    Ia = I_rms * math.sqrt(2.0)
+    wmap = None
+    T = {}
+    for d in (0.0, 90.0, 180.0, 270.0):
+        s = Magnetostatic2D(mesh, model["materials"], steel_name, magnet_name)
+        if wmap is None:
+            wmap = build_winding_map(s)
+        te = math.radians(d)
+        iph = {"A": Ia * math.sin(te),
+               "B": Ia * math.sin(te - 2 * math.pi / 3),
+               "C": Ia * math.sin(te + 2 * math.pi / 3)}
+        at = {}
+        for ph, sides in wmap.items():
+            for ci, sgn in sides:
+                at[ci] = sgn * Zc * iph[ph]
+        s.set_coil_currents(at)
+        res = s.solve(tol=1e-5)
+        T[d] = torque_arkkio(s, res, sbm.r_i + 0.005, sbm.r_o - 0.005, L)
+    A = (T[90.0] - T[270.0]) / 2.0
+    B = (T[0.0] - T[180.0]) / 2.0
+    return math.degrees(math.atan2(A, B)) % 360.0
+
+
 def vary(model: dict, x: Dict[str, float]) -> Dict[str, float]:
     """설계점 x를 원시 수식에 주입해 전체 변수 재해석 (SI)."""
     raw = dict(model["variables_raw"])
@@ -50,30 +111,42 @@ def vary(model: dict, x: Dict[str, float]) -> Dict[str, float]:
 
 def evaluate_design(model: dict, style: str, x: Dict[str, float],
                     n_emf: int = 6, n_load: int = 8,
-                    n_band: int = 2880) -> dict:
-    """단일 설계 평가. 실패 시 status='fail'."""
+                    n_band: int = 2880, *,
+                    I_rms: float | None = None,
+                    delta_e_deg: float = DELTA_E_DEG,
+                    steel_name: str | None = None,
+                    magnet_name: str | None = None) -> dict:
+    """단일 설계 평가. 실패 시 status='fail'.
+
+    I_rms 미지정 시 모델 변수값 사용(무부하 설계는 0이므로 명시 권장).
+    재질 미지정 시 자동 감지. delta_e_deg는 calibrate_delta()로 모델별 산출.
+    """
     out = {"x": x, "status": "ok"}
     try:
+        if steel_name is None or magnet_name is None:
+            from .aedt_parser import detect_material_names
+            steel_name, magnet_name = detect_material_names(model)
         v = vary(model, x)
         geo = build_motor(v, style)
-        if len(geo.coils) != 36 or len(geo.magnets) != int(round(v["N_pole"])):
+        n_slot = int(round(v["N_slot"]))
+        if len(geo.coils) != 2 * n_slot \
+                or len(geo.magnets) != int(round(v["N_pole"])):
             raise ValueError("형상 불완전")
         sbm = SlidingBandMesh(geo, n_band=n_band)
         L = v["L_stk"]
         Zc = int(round(v["Zc"]))
-        Ia = v["I_rms"] * math.sqrt(2.0)
+        Ia = (I_rms if I_rms is not None else v["I_rms"]) * math.sqrt(2.0)
         pp = int(round(v["N_pole"])) // 2
         wmap = None
 
         def solve(theta, load):
             nonlocal wmap
             s = Magnetostatic2D(sbm.merge(theta), model["materials"],
-                                "20PNX1200F_20C",
-                                "Arnold_Magnetics_N45UH_80C")
+                                steel_name, magnet_name)
             if wmap is None:
                 wmap = build_winding_map(s)
             if load:
-                te = pp * math.radians(theta) + math.radians(DELTA_E_DEG)
+                te = pp * math.radians(theta) + math.radians(delta_e_deg)
                 iph = {"A": Ia * math.sin(te),
                        "B": Ia * math.sin(te - 2 * math.pi / 3),
                        "C": Ia * math.sin(te + 2 * math.pi / 3)}
@@ -88,8 +161,8 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
             res = s.solve(tol=1e-5)
             return s, res, iph
 
-        # ---- 무부하: EMF (λ_A 푸리에) --------------------------------
-        angs_e = np.linspace(0, 45, n_emf, endpoint=False)
+        # ---- 무부하: EMF (λ_A 푸리에, 전기 1주기) ---------------------
+        angs_e = np.linspace(0, 360.0 / pp, n_emf, endpoint=False)
         lamA = []
         for a in angs_e:
             s, res, _ = solve(a, False)
@@ -102,8 +175,8 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
                               for k in range(1, len(F))))
         out["emf_rms"] = e_rms
 
-        # ---- 부하: 평균토크 + 리플 (리플 1주기 = 7.5° + 가드 2점) ------
-        step = 7.5 / n_load
+        # ---- 부하: 평균토크 + 리플 (전기 60° = 리플 1주기 + 가드 2점) --
+        step = (60.0 / pp) / n_load
         angs_l = np.arange(-1, n_load + 1) * step      # 가드 포함 n+2점
         Wc, lam3, i3, Ta = [], [], [], []
         Bt = 0.0

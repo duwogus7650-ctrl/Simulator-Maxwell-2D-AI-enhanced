@@ -12,6 +12,7 @@ import math
 import os
 import re
 import sys
+import time
 import traceback
 import warnings
 
@@ -506,6 +507,16 @@ class MainWindow(QMainWindow):
     def _tab_optimize(self):
         w = QWidget(); lay = QHBoxLayout(w)
         left = QVBoxLayout()
+        grp = QGroupBox("DOE 생성 — 서로게이트 학습 데이터 (모델별 1회)")
+        g = QGridLayout(grp)
+        self.sp_ndoe = QDoubleSpinBox(); self.sp_ndoe.setRange(10, 300)
+        self.sp_ndoe.setDecimals(0); self.sp_ndoe.setValue(60)
+        g.addWidget(QLabel("설계 수 (권장 60+, 설계당 ~20초)"), 0, 0)
+        g.addWidget(self.sp_ndoe, 1, 0)
+        b0 = QPushButton("▶ DOE 생성 (전류는 Solve 탭 상전류 사용)")
+        b0.clicked.connect(self.run_doe_build)
+        g.addWidget(b0, 2, 0)
+        left.addWidget(grp)
         b1 = QPushButton("▶ 액티브러닝 1라운드 (DE→FEM 검증→재학습)")
         b1.clicked.connect(self.run_active_round)
         b2 = QPushButton("▶ SAC 정책으로 현재 설계 개선 (24스텝)")
@@ -529,21 +540,108 @@ class MainWindow(QMainWindow):
         lay.addWidget(sp)
         return w
 
+    def run_doe_build(self):
+        if self.aedt_path is None:
+            self.log_opt.appendPlainText("⚠ 먼저 Model 탭에서 aedt를 여세요")
+            return
+        model, style = self.model, self.style
+        n = int(self.sp_ndoe.value())
+        irms = float(self.sp_irms.value())
+        dataset, _ = self._dataset_paths()
+        meta_path = dataset[:-6] + ".meta.json"          # .jsonl → .meta.json
+
+        def job(log):
+            from scipy.stats import qmc
+            from motoropt.doe import (bounds_for_model, baseline_design,
+                                      calibrate_delta, evaluate_design)
+            from motoropt.aedt_parser import detect_material_names
+            if irms <= 0:
+                log("⚠ 상전류가 0 — Solve 탭에서 정격 상전류 입력 후 실행")
+                return None
+            v = model["variables"]
+            steel, mag = detect_material_names(model)
+            bounds = bounds_for_model(v)
+            log("설계변수 범위: " + ", ".join(
+                f"{k} {lo:g}~{hi:g}" for k, (lo, hi) in bounds.items()))
+            log(f"δ 캘리브레이션 (4점, {irms:.2f} Arms)...")
+            delta = calibrate_delta(model, style, I_rms=irms,
+                                    steel_name=steel, magnet_name=mag)
+            log(f"δ* = {delta:.1f}°e")
+            json.dump({"I_rms": irms, "delta_e_deg": delta, "bounds": bounds,
+                       "design": model.get("design_name")},
+                      open(meta_path, "w", encoding="utf-8"))
+
+            keys = list(bounds)
+            lo = np.array([bounds[k][0] for k in keys])
+            hi = np.array([bounds[k][1] for k in keys])
+            X = qmc.LatinHypercube(d=len(keys), seed=7).random(n) * (hi - lo) + lo
+            designs = [baseline_design(v)] + \
+                      [dict(zip(keys, map(float, row))) for row in X]
+            done = set()
+            if os.path.exists(dataset):                  # 이어돌리기
+                with open(dataset, encoding="utf-8") as f:
+                    for line in f:
+                        try:
+                            done.add(tuple(round(val, 6) for val in
+                                           json.loads(line)["x"].values()))
+                        except Exception:
+                            pass
+            designs = [d for d in designs
+                       if tuple(round(val, 6) for val in d.values())
+                       not in done]
+            log(f"평가할 설계 {len(designs)}개 (기존 {len(done)}개 스킵) — "
+                f"예상 {len(designs)*20//60}분")
+            t0 = time.time()
+            n_ok = n_fail = 0
+            with open(dataset, "a", encoding="utf-8") as f:
+                for i, x in enumerate(designs):
+                    r = evaluate_design(model, style, x, I_rms=irms,
+                                        delta_e_deg=delta, steel_name=steel,
+                                        magnet_name=mag)
+                    f.write(json.dumps(r) + "\n"); f.flush()
+                    if r["status"] == "ok":
+                        n_ok += 1
+                    else:
+                        n_fail += 1
+                    el = time.time() - t0
+                    eta = el / (i + 1) * (len(designs) - i - 1)
+                    log(f"{i+1}/{len(designs)} {r['status'][:36]} | "
+                        f"경과 {el/60:.1f}분 남음 {eta/60:.1f}분")
+            log(f"✅ DOE 완료: 유효 {n_ok} / 실패 {n_fail} → "
+                f"{os.path.basename(dataset)}\n이제 액티브러닝 1라운드를 "
+                "실행하세요.")
+            return None
+
+        self._spawn(job, self.log_opt.appendPlainText, lambda *_: None)
+
+    def _load_meta(self):
+        """DOE 메타(bounds·δ·전류) — 없으면 400W 레거시 기본값."""
+        dataset, _ = self._dataset_paths()
+        meta_path = dataset[:-6] + ".meta.json"
+        if os.path.exists(meta_path):
+            mt = json.load(open(meta_path, encoding="utf-8"))
+            return ({k: tuple(b) for k, b in mt["bounds"].items()},
+                    float(mt["delta_e_deg"]), float(mt["I_rms"]))
+        from motoropt.doe import BOUNDS, DELTA_E_DEG
+        return (dict(BOUNDS), DELTA_E_DEG,
+                float(self.model["variables"].get("I_rms", 0.0) or 0.0))
+
     def run_active_round(self):
         if self.aedt_path is None:
             self.log_opt.appendPlainText("⚠ 먼저 Model 탭에서 aedt를 여세요")
             return
-        aedt = self.aedt_path
+        model, style = self.model, self.style
         try:
             spec = self._spec_from_table()
         except ValueError as e:
             self.log_opt.appendPlainText(f"⚠ {e}")
             return
         dataset, surro = self._dataset_paths()
+        bounds, delta, irms = self._load_meta()
 
         def job(log):
             from scipy.optimize import differential_evolution
-            from motoropt.doe import BOUNDS, _init, _eval
+            from motoropt.doe import evaluate_design
             from motoropt.surrogate import (load_dataset, train_surrogate,
                                             save, X_KEYS, Y_KEYS)
             from motoropt.objective import SurrogateObjective, desirability
@@ -559,17 +657,22 @@ class MainWindow(QMainWindow):
                     "(Solve 탭 부하 스윕으로 평가)")
             log(f"서로게이트 재학습... ({os.path.basename(dataset)})")
             X, Y = load_dataset(dataset)
+            if len(X) < 20:
+                log(f"⚠ 유효 샘플 {len(X)}개 — 너무 적습니다. "
+                    "DOE 생성으로 60개 이상 확보 권장.")
+                return None
             mdl, sc, met, _ = train_surrogate(X, Y)
             save(mdl, sc, surro)
-            obj = SurrogateObjective(surro, BOUNDS, spec=spec)
-            log(f"DE 최적화 (샘플 {len(X)})...")
+            obj = SurrogateObjective(surro, bounds, spec=spec)
+            log(f"DE 최적화 (샘플 {len(X)}, δ*={delta:.1f}°, "
+                f"I={irms:.2f}A)...")
             r = differential_evolution(lambda u: -obj.D(u)[0],
                                        [(0, 1)] * 5, seed=0,
                                        maxiter=250, tol=1e-8)
             xd = dict(zip(X_KEYS, map(float, obj.x_of(r.x))))
             log(f"서로게이트 D={-r.fun:.4f} → FEM 검증 중 (~30초)...")
-            _init(aedt)
-            fem = _eval(xd)
+            fem = evaluate_design(model, style, xd, I_rms=irms or None,
+                                  delta_e_deg=delta)
             with open(dataset, "a") as f:
                 f.write(json.dumps(fem) + "\n")
             if fem["status"] != "ok":
@@ -593,6 +696,7 @@ class MainWindow(QMainWindow):
               "W_t": v["W_t"] * 1e3, "MagnetR": v["MagnetR"] * 1e3}
 
         dataset, surro = self._dataset_paths()
+        bounds, _, _ = self._load_meta()
 
         def job(log):
             try:
@@ -603,14 +707,13 @@ class MainWindow(QMainWindow):
             if not os.path.exists(surro):
                 log("⚠ 서로게이트 없음 — 액티브러닝 1라운드를 먼저 실행하세요")
                 return None
-            from motoropt.doe import BOUNDS
             from motoropt.objective import SurrogateObjective
             from motoropt.rl_opt import DesignEnv, SAC
-            obj = SurrogateObjective(surro, BOUNDS)
+            obj = SurrogateObjective(surro, bounds)
             env = DesignEnv(obj)
             env.reset()
-            env.u = np.array([(x0[k] - BOUNDS[k][0])
-                              / (BOUNDS[k][1] - BOUNDS[k][0])
+            env.u = np.array([(x0[k] - bounds[k][0])
+                              / (bounds[k][1] - bounds[k][0])
                               for k in obj.keys]).clip(0, 1)
             env.D = float(obj.D(env.u)[0])
             log(f"시작 D={env.D:.4f}")
@@ -674,9 +777,13 @@ class MainWindow(QMainWindow):
             return
         D, xd, fem = self.candidates[0]
         base_area = sum(p.area for p, _, _ in self.geo.magnets)
-        rows = [("종합 만족도 D", "0 (면적=상한)", f"{D:.4f}"),
-                ("평균토크 [mNm]", "862.0", f"{fem['T_avg']:.1f}"),
-                ("EMF RMS [V]", "6.164", f"{fem['emf_rms']:.3f}"),
+        is_400w = (self.model or {}).get("design_name") == self._DESIGN_400W
+        rows = [("종합 만족도 D", "0 (면적=상한)" if is_400w else "—",
+                 f"{D:.4f}"),
+                ("평균토크 [mNm]", "862.0" if is_400w else "—",
+                 f"{fem['T_avg']:.1f}"),
+                ("EMF RMS [V]", "6.164" if is_400w else "—",
+                 f"{fem['emf_rms']:.3f}"),
                 ("자석 면적 [mm²]", f"{base_area:.1f}",
                  f"{fem['magnet_area']:.1f} "
                  f"({(fem['magnet_area']/base_area-1)*100:+.1f}%)")]
