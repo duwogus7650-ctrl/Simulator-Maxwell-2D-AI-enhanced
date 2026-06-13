@@ -895,21 +895,63 @@ class MainWindow(QMainWindow):
         lay.addWidget(sp)
         return w
 
+    def _baseline_fem_row(self):
+        """DOE 기준 설계의 FEM 응답 행 (없으면 None) — Result 기준값 소스."""
+        if self.model is None:
+            return None
+        dataset, _ = self._dataset_paths()
+        if not os.path.exists(dataset):
+            return None
+        from motoropt.doe import baseline_design
+        base = {k: round(v_, 6) for k, v_
+                in baseline_design(self.model["variables"]).items()}
+        row = None
+        with open(dataset, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                if r.get("status") != "ok":
+                    continue
+                if {k: round(v_, 6) for k, v_ in r["x"].items()} == base:
+                    return r
+                row = row or r                     # 기준 못 찾으면 첫 유효 행
+        return row
+
     def _update_result(self):
         if not self.candidates or self.geo is None:
             return
+        from motoropt.objective import _D_FUNCS
         D, xd, fem = self.candidates[0]
         base_area = sum(p.area for p, _, _ in self.geo.magnets)
-        is_400w = (self.model or {}).get("design_name") == self._DESIGN_400W
-        rows = [("종합 만족도 D", "0 (면적=상한)" if is_400w else "—",
-                 f"{D:.4f}"),
-                ("평균토크 [mNm]", "862.0" if is_400w else "—",
-                 f"{fem['T_avg']:.1f}"),
-                ("EMF RMS [V]", "6.164" if is_400w else "—",
-                 f"{fem['emf_rms']:.3f}"),
-                ("자석 면적 [mm²]", f"{base_area:.1f}",
-                 f"{fem['magnet_area']:.1f} "
-                 f"({(fem['magnet_area']/base_area-1)*100:+.1f}%)")]
+        try:
+            spec = self._spec_from_table()      # 사용자가 선택한 목표 항목
+        except ValueError:
+            spec = {}
+        base_row = self._baseline_fem_row()
+
+        def base_of(key):                        # 항목별 기준값
+            if key == "magnet_area":
+                return base_area
+            if base_row and key in base_row:
+                return base_row[key]
+            return None
+
+        rows = [("종합 만족도 D", "—", f"{D:.4f}")]
+        for key, s in spec.items():
+            unit = OBJ_UNITS.get(key, "")
+            name = f"{key} [{unit}]" if unit else key
+            b = base_of(key)
+            b_txt = f"{b:.4g}" if b is not None else "—"
+            if key in fem:                       # FEM 검증된 응답
+                opt = fem[key]
+                d = float(_D_FUNCS[s[0]](np.array([opt], float), *s[1:])[0])
+                pct = f", {(opt / b - 1) * 100:+.1f}%" if b else ""
+                opt_txt = f"{opt:.4g}  (만족도 {d:.2f}{pct})"
+            else:                                # efficiency 등 서로게이트 외
+                opt_txt = "— (Solve 탭 부하 스윕으로 평가)"
+            rows.append((name, b_txt, opt_txt))
         self.tbl_res.setRowCount(len(rows))
         for i, r in enumerate(rows):
             for j, t in enumerate(r):
