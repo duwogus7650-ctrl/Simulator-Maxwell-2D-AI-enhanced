@@ -761,13 +761,21 @@ class MainWindow(QMainWindow):
             return
         dataset, surro = self._dataset_paths()
         bounds, delta, irms = self._load_meta()
+        # 효율이 목표에 있으면 부하 스윕까지 평가 — Solve 탭 운전조건 사용
+        want_eff = "efficiency" in spec
+        rpm = float(self.sp_rpm.value())
+        d_cu = float(self.sp_dcu.value())
+        strands = int(self.sp_strands.value())
+        tcu = float(self.sp_tcu.value())
+        rph = float(self.sp_rph.value()) * 1e-3 or None     # mΩ→Ω, 0=MLT
 
         def job(log):
             from scipy.optimize import differential_evolution
             from motoropt.doe import evaluate_design
             from motoropt.surrogate import (load_dataset, train_surrogate,
                                             save, X_KEYS, Y_KEYS)
-            from motoropt.objective import SurrogateObjective, desirability
+            from motoropt.objective import (SurrogateObjective,
+                                            desirability_from_dict)
             if not os.path.exists(dataset):
                 log(f"⚠ 이 모델용 DOE 데이터셋이 없습니다: "
                     f"{os.path.basename(dataset)}\n"
@@ -793,18 +801,24 @@ class MainWindow(QMainWindow):
                                        [(0, 1)] * 5, seed=0,
                                        maxiter=250, tol=1e-8)
             xd = dict(zip(X_KEYS, map(float, obj.x_of(r.x))))
-            log(f"서로게이트 D={-r.fun:.4f} → FEM 검증 중 (~30초)...")
+            eta_note = " + 효율 부하스윕(~+60초)" if want_eff else ""
+            log(f"서로게이트 D={-r.fun:.4f} → FEM 검증 중 (~30초{eta_note})...")
             fem = evaluate_design(model, style, xd, I_rms=irms or None,
-                                  delta_e_deg=delta)
+                                  delta_e_deg=delta, with_efficiency=want_eff,
+                                  rpm=rpm, d_cu_mm=d_cu, strands=strands,
+                                  T_cu_C=tcu, R_ph_ohm=rph)
             with open(dataset, "a") as f:
                 f.write(json.dumps(fem) + "\n")
             if fem["status"] != "ok":
                 log(f"FEM 실패: {fem['status'][:40]}")
                 return None
-            Yv = np.array([[fem[k] for k in Y_KEYS]])
-            D = float(desirability(Yv, spec=spec)[0])
-            log(f"FEM D={D:.4f} | T={fem['T_avg']:.1f} "
-                f"EMF={fem['emf_rms']:.3f} A={fem['magnet_area']:.1f}")
+            D = desirability_from_dict(fem, spec)   # efficiency 포함 검증 D
+            msg = (f"FEM D={D:.4f} | T={fem['T_avg']:.1f} "
+                   f"EMF={fem['emf_rms']:.3f} A={fem['magnet_area']:.1f}")
+            if "efficiency" in fem:
+                msg += (f" η={fem['efficiency']*100:.1f}% "
+                        f"(P_fe {fem['P_fe']:.1f} P_cu {fem['P_cu']:.1f}W)")
+            log(msg)
             return (D, xd, fem)
 
         self._spawn(job, self.log_opt.appendPlainText, self._cand_done)

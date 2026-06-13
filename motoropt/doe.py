@@ -115,11 +115,21 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
                     I_rms: float | None = None,
                     delta_e_deg: float = DELTA_E_DEG,
                     steel_name: str | None = None,
-                    magnet_name: str | None = None) -> dict:
+                    magnet_name: str | None = None,
+                    with_efficiency: bool = False,
+                    rpm: float | None = None,
+                    d_cu_mm: float = 0.25,
+                    strands: int = 11,
+                    T_cu_C: float = 80.0,
+                    R_ph_ohm: float | None = None) -> dict:
     """단일 설계 평가. 실패 시 status='fail'.
 
     I_rms 미지정 시 모델 변수값 사용(무부하 설계는 0이므로 명시 권장).
     재질 미지정 시 자동 감지. delta_e_deg는 calibrate_delta()로 모델별 산출.
+
+    with_efficiency=True면 전기 1주기 부하 스윕(검증된 sweep_loss 경로)을
+    추가로 돌려 efficiency·P_fe·P_cu를 출력에 더한다 — 솔브 ~50회 추가
+    소요. rpm/권선 사양(d_cu_mm·strands·T_cu_C) 또는 R_ph_ohm 직접 지정.
     """
     out = {"x": x, "status": "ok"}
     try:
@@ -202,6 +212,34 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
         out["T_arkkio"] = float(np.mean(np.asarray(Ta)[1:-1]) * 1e3)
         out["B_tooth"] = Bt
         out["magnet_area"] = float(sum(p.area for p, _, _ in geo.magnets))
+
+        # ---- (옵션) 효율: 검증된 전기1주기 스윕 + 손실 ------------------
+        if with_efficiency:
+            Irms_ph = float(I_rms if I_rms is not None
+                            else v.get("I_rms") or 0.0)
+            if Irms_ph > 0:
+                from .sweep_loss import (sweep_load_with_fields,
+                                         compute_responses, calibrate_gamma)
+                from .winding import phase_resistance
+                m2 = {**model, "variables": v}
+                rpm_use = float(rpm or v.get("BaseRPM") or 1000.0)
+                ip = v.get("ini_pos", 0.0)
+                ini = math.degrees(ip) if isinstance(ip, (int, float)) else 0.0
+                cal = calibrate_gamma(m2, style, rpm=rpm_use, I_rms=Irms_ph,
+                                      n_steps=6, init_pos_deg=ini)
+                sw = sweep_load_with_fields(
+                    m2, style, rpm=rpm_use, I_rms=Irms_ph,
+                    gamma_deg=cal["gamma_max_deg"], n_steps=36,
+                    init_pos_deg=ini, steel_name=steel_name,
+                    magnet_name=magnet_name)
+                rph = R_ph_ohm
+                if not rph or rph <= 0:
+                    rph = phase_resistance(v, d_cu_mm=d_cu_mm, strands=strands,
+                                           T_cu_C=T_cu_C)["R_ph"]
+                rr = compute_responses(sw, m2, R_ph_ohm=rph)
+                out["efficiency"] = float(rr["efficiency"])
+                out["P_fe"] = float(rr["P_fe"])
+                out["P_cu"] = float(rr["P_cu"])
     except Exception as e:  # noqa: BLE001
         out["status"] = f"fail: {type(e).__name__}: {e}"
     return out

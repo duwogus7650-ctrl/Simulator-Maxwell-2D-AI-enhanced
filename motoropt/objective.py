@@ -63,6 +63,22 @@ def desirability(Y: np.ndarray, spec: dict | None = None) -> np.ndarray:
     return D ** (1.0 / n)
 
 
+def desirability_from_dict(resp: dict, spec: dict) -> float:
+    """응답 dict + spec → 종합 만족도 D.
+
+    spec 키 중 resp에 실제로 존재하는 응답만 기하평균에 참여한다
+    (서로게이트 Y_KEYS에 없는 efficiency 등 FEM 응답도 포함 가능).
+    """
+    ds = []
+    for k, s in spec.items():
+        if k in resp and resp[k] is not None:
+            ds.append(float(_D_FUNCS[s[0]](np.array([resp[k]], float),
+                                           *s[1:])[0]))
+    if not ds:
+        return 0.0
+    return float(np.prod(ds) ** (1.0 / len(ds)))
+
+
 class SurrogateObjective:
     """정규화 입력 u∈[0,1]^5 → D. RL/GA 공용 평가기."""
 
