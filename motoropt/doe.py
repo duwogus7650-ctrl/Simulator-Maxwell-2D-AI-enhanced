@@ -118,6 +118,7 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
                     magnet_name: str | None = None,
                     with_efficiency: bool = False,
                     with_cogging: bool = False,
+                    with_current_min: bool = False,
                     n_cog: int = 16,
                     rpm: float | None = None,
                     d_cu_mm: float = 0.25,
@@ -235,6 +236,26 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
                                         sbm.r_o - 0.005, L))
             Tc = np.asarray(Tc)
             out["cogging_pp"] = float((Tc.max() - Tc.min()) * 1e3)   # mNm
+
+        # ---- (옵션) 전류 최소화 = 동손 최소화 --------------------------
+        # 목표 토크 T를 내는 데 필요한 동손 = 3·I_req²·R_ph, I_req=I·T/T_avg
+        #  → Pcu(T) = (3·I²·R_ph)/T_avg² · T² = Pcu_per_Nm2 · T².
+        # 즉 Pcu_per_Nm2(=동손/토크²)를 최소화하면 임의의 목표 토크에 대해
+        # 필요 전류와 동손이 동시에 최소가 된다(전류최소화 ≡ 동손최소화).
+        # T_avg(학습됨)·R_ph(기하, FEM불필요)로 계산 → 추가 솔브 0.
+        if with_current_min:
+            from .winding import phase_resistance
+            Iph = float(I_rms if I_rms is not None else v.get("I_rms") or 0.0)
+            rph = R_ph_ohm
+            if not rph or rph <= 0:
+                rph = phase_resistance(v, d_cu_mm=d_cu_mm, strands=strands,
+                                       T_cu_C=T_cu_C)["R_ph"]
+            T_Nm = out["T_avg"] / 1000.0
+            if Iph > 0 and T_Nm > 0:
+                pcu = 3.0 * Iph ** 2 * rph                  # 현 전류 동손 [W]
+                out["Pcu_per_Nm2"] = float(pcu / T_Nm ** 2)  # 동손/토크² [W/Nm²]
+                out["I_per_Nm"] = float(Iph / T_Nm)          # 전류/토크 [A/Nm]참고
+                out["R_ph_ohm"] = float(rph)
 
         # ---- (옵션) 효율: 검증된 전기1주기 스윕 + 손실 ------------------
         if with_efficiency:

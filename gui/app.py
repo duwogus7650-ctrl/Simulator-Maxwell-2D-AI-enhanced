@@ -67,7 +67,8 @@ from matplotlib.figure import Figure
 DESIGN_VARS = ["a_m", "T_m", "T_m2", "W_t", "MagnetR"]
 
 OBJ_UNITS = {"T_avg": "mNm", "emf_rms": "V", "magnet_area": "mm²",
-             "ripple_pct": "%", "efficiency": "0~1", "cogging_pp": "mNm"}
+             "ripple_pct": "%", "efficiency": "0~1", "cogging_pp": "mNm",
+             "Pcu_per_Nm2": "W/Nm²(동손↓)"}
 
 
 def _obj_key(text: str) -> str:
@@ -695,8 +696,9 @@ class MainWindow(QMainWindow):
             _spec = self._spec_from_table()
             want_eff = "efficiency" in _spec
             want_cog = "cogging_pp" in _spec
+            want_cmin = "Pcu_per_Nm2" in _spec
         except ValueError:
-            want_eff = want_cog = False
+            want_eff = want_cog = want_cmin = False
         rpm = float(self.sp_rpm.value())
         d_cu = float(self.sp_dcu.value())
         strands = int(self.sp_strands.value())
@@ -760,7 +762,8 @@ class MainWindow(QMainWindow):
                                         delta_e_deg=delta, steel_name=steel,
                                         magnet_name=mag,
                                         with_efficiency=want_eff,
-                                        with_cogging=want_cog, rpm=rpm,
+                                        with_cogging=want_cog,
+                                        with_current_min=want_cmin, rpm=rpm,
                                         d_cu_mm=d_cu, strands=strands,
                                         T_cu_C=tcu, R_ph_ohm=rph)
                     f.write(json.dumps(r) + "\n"); f.flush()
@@ -880,6 +883,7 @@ class MainWindow(QMainWindow):
         # 효율이 목표에 있으면 부하 스윕까지 평가 — Solve 탭 운전조건 사용
         want_eff = "efficiency" in spec
         want_cog = "cogging_pp" in spec
+        want_cmin = "Pcu_per_Nm2" in spec
         rpm = float(self.sp_rpm.value())
         d_cu = float(self.sp_dcu.value())
         strands = int(self.sp_strands.value())
@@ -925,6 +929,7 @@ class MainWindow(QMainWindow):
             fem = evaluate_design(model, style, xd, I_rms=irms or None,
                                   delta_e_deg=delta, with_efficiency=want_eff,
                                   with_cogging=want_cog,
+                                  with_current_min=want_cmin,
                                   rpm=rpm, d_cu_mm=d_cu, strands=strands,
                                   T_cu_C=tcu, R_ph_ohm=rph)
             with open(dataset, "a") as f:

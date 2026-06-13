@@ -39,6 +39,8 @@ SPEC_EXTRA = {
     "ripple_pct": ("smaller", 1.0, 5.0),
     "efficiency": ("larger", 0.90, 0.95),
     "cogging_pp": ("smaller", 5.0, 30.0),   # mNm, 모델별로 L/U 조정 권장
+    # 전류 최소화 ≡ 동손 최소화: 목표 토크당 동손(W/Nm²) ↓ → 필요 전류·동손 ↓
+    "Pcu_per_Nm2": ("smaller", 5.0, 30.0),  # W/Nm², 모델별로 L/U 조정 권장
 }
 
 _D_FUNCS = {"larger": d_larger, "smaller": d_smaller, "target": d_target}
