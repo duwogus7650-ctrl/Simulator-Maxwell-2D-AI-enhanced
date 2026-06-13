@@ -279,6 +279,8 @@ class MainWindow(QMainWindow):
             self.tbl_obj.setItem(i, 1, name)
             cb = QComboBox(); cb.addItems(["larger", "smaller", "target"])
             cb.setCurrentText(spec[0])
+            cb.currentTextChanged.connect(
+                lambda _t, r=i: self._update_obj_row_state(r))
             self.tbl_obj.setCellWidget(i, 2, cb)
             if spec[0] == "target":
                 vals = {3: spec[1], 4: spec[2], 5: spec[3]}
@@ -288,6 +290,7 @@ class MainWindow(QMainWindow):
                 self.tbl_obj.setItem(
                     i, c, QTableWidgetItem(
                         f"{vals[c]:.4g}" if c in vals else ""))
+            self._update_obj_row_state(i)
         lay.addWidget(self.tbl_obj)
         lay.addWidget(QLabel(
             "종합 만족도 D = (∏ dᵢ)^(1/n) — 모든 목표를 동시에 만족할수록 "
@@ -344,14 +347,19 @@ class MainWindow(QMainWindow):
         self.sp_strands.setDecimals(0); self.sp_strands.setValue(11)
         self.sp_tcu = QDoubleSpinBox(); self.sp_tcu.setRange(-40, 250)
         self.sp_tcu.setDecimals(0); self.sp_tcu.setValue(80)
+        self.cb_ibase = QComboBox()
+        self.cb_ibase.addItems(["상전류 (권선)", "선간전류 · Y결선",
+                                "선간전류 · Δ결선"])
         for col, (lbl, w_) in enumerate(
-                [("속도 [rpm]", self.sp_rpm), ("상전류 [Arms]", self.sp_irms),
+                [("전류 [Arms]", self.sp_irms),
+                 ("전류 기준 (해석은 상전류)", self.cb_ibase),
                  ("상저항 [mΩ] (0=MLT 계산)", self.sp_rph),
                  ("스텝", self.sp_nstep)]):
             g.addWidget(QLabel(lbl), 0, col)
             g.addWidget(w_, 1, col)
         for col, (lbl, w_) in enumerate(
-                [("나동선 지름 [mm]", self.sp_dcu),
+                [("속도 [rpm]", self.sp_rpm),
+                 ("나동선 지름 [mm]", self.sp_dcu),
                  ("가닥수", self.sp_strands),
                  ("권선온도 [°C]", self.sp_tcu)]):
             g.addWidget(QLabel(lbl), 2, col)
@@ -422,13 +430,26 @@ class MainWindow(QMainWindow):
 
         self._spawn(job, self.log_solve.appendPlainText, self._solve_done)
 
+    def _phase_current(self) -> tuple:
+        """전류 입력 + 기준 콤보 → (상전류 Arms, 환산 설명)."""
+        I = float(self.sp_irms.value())
+        mode = self.cb_ibase.currentText()
+        if "Δ" in mode:
+            return I / math.sqrt(3.0), \
+                f"선간 {I:.2f}A (Δ) → 상전류 {I/math.sqrt(3.0):.2f}A"
+        if "Y" in mode:
+            return I, f"선간 {I:.2f}A (Y) = 상전류 {I:.2f}A"
+        return I, ""
+
     def run_load_sweep(self):
         if self.geo is None:
             self.log_solve.appendPlainText("⚠ 먼저 Model 탭에서 aedt를 여세요")
             return
         model, style, raw = self.model, self.style, self.current_raw()
         rpm = float(self.sp_rpm.value())
-        irms = float(self.sp_irms.value())
+        irms, i_note = self._phase_current()
+        if i_note:
+            self.log_solve.appendPlainText(i_note)
         rph = float(self.sp_rph.value()) * 1e-3 or None    # mΩ → Ω, 0=MLT 계산
         nstep = int(self.sp_nstep.value())
         d_cu = float(self.sp_dcu.value())
@@ -548,7 +569,9 @@ class MainWindow(QMainWindow):
             return
         model, style = self.model, self.style
         n = int(self.sp_ndoe.value())
-        irms = float(self.sp_irms.value())
+        irms, i_note = self._phase_current()
+        if i_note:
+            self.log_opt.appendPlainText(i_note)
         dataset, _ = self._dataset_paths()
         meta_path = dataset[:-6] + ".meta.json"          # .jsonl → .meta.json
 
@@ -622,6 +645,32 @@ class MainWindow(QMainWindow):
                 "ℹ Objective 목표값을 이 모델의 기준 설계 성능으로 갱신했습니다 "
                 "(Objective 탭에서 확인·수정 가능)")
 
+    def _load_meta(self):
+        """DOE 메타(bounds·δ·전류) — 없으면 400W 레거시 기본값."""
+        dataset, _ = self._dataset_paths()
+        meta_path = dataset[:-6] + ".meta.json"
+        if os.path.exists(meta_path):
+            mt = json.load(open(meta_path, encoding="utf-8"))
+            return ({k: tuple(b) for k, b in mt["bounds"].items()},
+                    float(mt["delta_e_deg"]), float(mt["I_rms"]))
+        from motoropt.doe import BOUNDS, DELTA_E_DEG
+        return (dict(BOUNDS), DELTA_E_DEG,
+                float(self.model["variables"].get("I_rms", 0.0) or 0.0))
+
+    def _update_obj_row_state(self, i: int):
+        """유형에 따라 T(목표) 칸 활성/비활성 — larger/smaller는 L·U만 사용."""
+        cb = self.tbl_obj.cellWidget(i, 2)
+        it = self.tbl_obj.item(i, 4)
+        if cb is None or it is None:
+            return
+        if cb.currentText() == "target":
+            it.setFlags(it.flags() | Qt.ItemFlag.ItemIsEditable
+                        | Qt.ItemFlag.ItemIsEnabled)
+        else:
+            it.setText("")
+            it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable
+                        & ~Qt.ItemFlag.ItemIsEnabled)
+
     def _set_obj_row(self, key: str, spec: tuple):
         for i in range(self.tbl_obj.rowCount()):
             if self.tbl_obj.item(i, 1).text().strip() != key:
@@ -632,6 +681,7 @@ class MainWindow(QMainWindow):
             for c in (3, 4, 5):
                 self.tbl_obj.setItem(i, c, QTableWidgetItem(
                     f"{vals[c]:.4g}" if c in vals else ""))
+            self._update_obj_row_state(i)
             return
 
     def _reset_spec_defaults(self):
@@ -674,18 +724,6 @@ class MainWindow(QMainWindow):
         self._set_obj_row("emf_rms", ("target", E0 * 0.95, E0, E0 * 1.05))
         self._set_obj_row("magnet_area", ("smaller", A0 * 0.74, A0))
         return True
-
-    def _load_meta(self):
-        """DOE 메타(bounds·δ·전류) — 없으면 400W 레거시 기본값."""
-        dataset, _ = self._dataset_paths()
-        meta_path = dataset[:-6] + ".meta.json"
-        if os.path.exists(meta_path):
-            mt = json.load(open(meta_path, encoding="utf-8"))
-            return ({k: tuple(b) for k, b in mt["bounds"].items()},
-                    float(mt["delta_e_deg"]), float(mt["I_rms"]))
-        from motoropt.doe import BOUNDS, DELTA_E_DEG
-        return (dict(BOUNDS), DELTA_E_DEG,
-                float(self.model["variables"].get("I_rms", 0.0) or 0.0))
 
     def run_active_round(self):
         if self.aedt_path is None:
