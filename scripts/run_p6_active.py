@@ -4,11 +4,12 @@ sys.path.insert(0, ".")
 import numpy as np
 from scipy.optimize import differential_evolution
 from motoropt.doe import BOUNDS, _init, _eval
-from motoropt.surrogate import load_dataset, train_surrogate, save, X_KEYS, Y_KEYS
+from motoropt.surrogate import load_dataset, train_surrogate, save, X_KEYS
 from motoropt.objective import SurrogateObjective, desirability
 
 DATA = "doe_results.jsonl"
 _init("/mnt/user-data/uploads/400W.aedt")
+Y_KEYS = None
 
 def fem(xdict):
     r = _eval(xdict)
@@ -16,13 +17,13 @@ def fem(xdict):
 
 def D_of_row(r):
     Y = np.array([[r[k] for k in Y_KEYS]])
-    return float(desirability(Y)[0])
+    return float(desirability(Y, y_keys=Y_KEYS)[0])
 
 log = []
 for rnd in range(1, 5):
-    X, Y = load_dataset(DATA)
-    model, scale, met, _ = train_surrogate(X, Y)
-    save(model, scale, "surrogate.joblib")
+    X, Y, Y_KEYS = load_dataset(DATA)
+    model, scale, met, _ = train_surrogate(X, Y, y_keys=Y_KEYS)
+    save(model, scale, "surrogate.joblib", y_keys=Y_KEYS)
     obj = SurrogateObjective("surrogate.joblib", BOUNDS)
     res = differential_evolution(lambda u: -obj.D(u)[0], [(0, 1)] * 5,
                                  seed=rnd, maxiter=300, tol=1e-8)

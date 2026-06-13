@@ -13,21 +13,40 @@ import numpy as np
 
 X_KEYS = ["a_m", "T_m", "T_m2_ratio", "W_t", "MagnetR"]
 Y_KEYS = ["T_avg", "emf_rms", "ripple_pct", "B_tooth", "magnet_area"]
+# 데이터셋에 있으면 추가로 학습하는 옵션 응답 (with_efficiency DOE)
+Y_KEYS_OPT = ["efficiency"]
+
+
+def dataset_y_keys(rows) -> list:
+    """ok 행 전부에 존재하는 응답만 학습 대상 — 구 데이터셋 호환."""
+    ok = [r for r in rows if r.get("status") == "ok"]
+    keys = list(Y_KEYS)
+    for k in Y_KEYS_OPT:
+        if ok and all(k in r and r[k] is not None for r in ok):
+            keys.append(k)
+    return keys
 
 
 def load_dataset(path: str):
-    X, Y = [], []
+    """→ (X, Y, y_keys). y_keys는 데이터셋에 실제로 있는 응답 집합."""
+    rows = []
     with open(path) as f:
         for line in f:
-            r = json.loads(line)
-            if r.get("status") != "ok":
-                continue
-            X.append([r["x"][k] for k in X_KEYS])
-            Y.append([r[k] for k in Y_KEYS])
-    return np.asarray(X), np.asarray(Y)
+            line = line.strip()
+            if line:
+                rows.append(json.loads(line))
+    y_keys = dataset_y_keys(rows)
+    X, Y = [], []
+    for r in rows:
+        if r.get("status") != "ok":
+            continue
+        X.append([r["x"][k] for k in X_KEYS])
+        Y.append([r[k] for k in y_keys])
+    return np.asarray(X), np.asarray(Y), y_keys
 
 
-def train_surrogate(X, Y, seed: int = 0):
+def train_surrogate(X, Y, seed: int = 0, y_keys: list | None = None):
+    y_keys = y_keys or Y_KEYS
     from sklearn.model_selection import cross_val_score, train_test_split
     from sklearn.pipeline import make_pipeline
     from sklearn.preprocessing import StandardScaler
@@ -47,7 +66,7 @@ def train_surrogate(X, Y, seed: int = 0):
 
     Yp = model.predict(Xte) * sd + mu
     metrics = {}
-    for j, k in enumerate(Y_KEYS):
+    for j, k in enumerate(y_keys):
         err = Yp[:, j] - Yte[:, j]
         ss = 1 - np.sum(err ** 2) / np.sum((Yte[:, j] - Yte[:, j].mean()) ** 2)
         metrics[k] = {"R2": float(ss),
@@ -57,10 +76,10 @@ def train_surrogate(X, Y, seed: int = 0):
     return model, (mu, sd), metrics, (Xte, Yte, Yp)
 
 
-def save(model, scale, path: str):
+def save(model, scale, path: str, y_keys: list | None = None):
     import joblib
     joblib.dump({"model": model, "mu": scale[0], "sd": scale[1],
-                 "x_keys": X_KEYS, "y_keys": Y_KEYS}, path)
+                 "x_keys": X_KEYS, "y_keys": y_keys or Y_KEYS}, path)
 
 
 def predict(bundle_path: str, X: np.ndarray) -> np.ndarray:

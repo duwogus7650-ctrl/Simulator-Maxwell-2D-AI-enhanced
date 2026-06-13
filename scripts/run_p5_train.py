@@ -8,18 +8,18 @@ fm.fontManager.addfont("/usr/share/fonts/truetype/nanum/NanumGothic.ttf")
 matplotlib.rcParams["font.family"] = "NanumGothic"
 matplotlib.rcParams["axes.unicode_minus"] = False
 import matplotlib.pyplot as plt
-from motoropt.surrogate import load_dataset, train_surrogate, save, Y_KEYS
+from motoropt.surrogate import load_dataset, train_surrogate, save
 
-X, Y = load_dataset("doe_results.jsonl")
+X, Y, Y_KEYS = load_dataset("doe_results.jsonl")
 print(f"유효 샘플 {len(X)}개")
-model, scale, metrics, (Xte, Yte, Yp) = train_surrogate(X, Y)
+model, scale, metrics, (Xte, Yte, Yp) = train_surrogate(X, Y, y_keys=Y_KEYS)
 for k, v in metrics.items():
     print(f"{k:12s} R²={v['R2']:.3f}  MAE={v['MAE']:.3g}  rel={v['rel%']:.1f}%")
-save(model, scale, "surrogate.joblib")
+save(model, scale, "surrogate.joblib", y_keys=Y_KEYS)
 
 units = {"T_avg": "mNm", "emf_rms": "V", "ripple_pct": "%",
-         "B_tooth": "T", "magnet_area": "mm²"}
-fig, axes = plt.subplots(1, 5, figsize=(20, 4.2), dpi=120)
+         "B_tooth": "T", "magnet_area": "mm²", "efficiency": "0~1"}
+fig, axes = plt.subplots(1, len(Y_KEYS), figsize=(4 * len(Y_KEYS), 4.2), dpi=120)
 for j, (ax, k) in enumerate(zip(axes, Y_KEYS)):
     ax.scatter(Yte[:, j], Yp[:, j], s=18, alpha=.75)
     lim = [min(Yte[:, j].min(), Yp[:, j].min()),

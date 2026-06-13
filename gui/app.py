@@ -598,6 +598,16 @@ class MainWindow(QMainWindow):
             self.log_opt.appendPlainText(i_note)
         dataset, _ = self._dataset_paths()
         meta_path = dataset[:-6] + ".meta.json"          # .jsonl → .meta.json
+        # efficiency가 목표에 있으면 DOE도 효율 포함 평가(느림) — Solve 운전조건
+        try:
+            want_eff = "efficiency" in self._spec_from_table()
+        except ValueError:
+            want_eff = False
+        rpm = float(self.sp_rpm.value())
+        d_cu = float(self.sp_dcu.value())
+        strands = int(self.sp_strands.value())
+        tcu = float(self.sp_tcu.value())
+        rph = float(self.sp_rph.value()) * 1e-3 or None
 
         def job(log):
             from scipy.stats import qmc
@@ -638,15 +648,22 @@ class MainWindow(QMainWindow):
             designs = [d for d in designs
                        if tuple(round(val, 6) for val in d.values())
                        not in done]
+            per = 90 if want_eff else 20
+            if want_eff:
+                log("ℹ 효율 포함 평가 — 설계당 ~90초(부하스윕). DE 탐색이 "
+                    "효율도 직접 최적화하게 됩니다.")
             log(f"평가할 설계 {len(designs)}개 (기존 {len(done)}개 스킵) — "
-                f"예상 {len(designs)*20//60}분")
+                f"예상 {len(designs)*per//60}분")
             t0 = time.time()
             n_ok = n_fail = 0
             with open(dataset, "a", encoding="utf-8") as f:
                 for i, x in enumerate(designs):
                     r = evaluate_design(model, style, x, I_rms=irms,
                                         delta_e_deg=delta, steel_name=steel,
-                                        magnet_name=mag)
+                                        magnet_name=mag,
+                                        with_efficiency=want_eff, rpm=rpm,
+                                        d_cu_mm=d_cu, strands=strands,
+                                        T_cu_C=tcu, R_ph_ohm=rph)
                     f.write(json.dumps(r) + "\n"); f.flush()
                     if r["status"] == "ok":
                         n_ok += 1
@@ -773,7 +790,7 @@ class MainWindow(QMainWindow):
             from scipy.optimize import differential_evolution
             from motoropt.doe import evaluate_design
             from motoropt.surrogate import (load_dataset, train_surrogate,
-                                            save, X_KEYS, Y_KEYS)
+                                            save, X_KEYS)
             from motoropt.objective import (SurrogateObjective,
                                             desirability_from_dict)
             if not os.path.exists(dataset):
@@ -782,18 +799,20 @@ class MainWindow(QMainWindow):
                     "서로게이트 최적화는 모델별 DOE(P5, scripts/run_p5_doe.py)가 "
                     "선행되어야 합니다 — 현재 400W 모델만 데이터 보유.")
                 return None
-            skipped = [k for k in spec if k not in Y_KEYS]
-            if skipped:
-                log(f"ℹ 서로게이트 응답에 없어 제외: {', '.join(skipped)} "
-                    "(Solve 탭 부하 스윕으로 평가)")
             log(f"서로게이트 재학습... ({os.path.basename(dataset)})")
-            X, Y = load_dataset(dataset)
+            X, Y, ykeys = load_dataset(dataset)
             if len(X) < 20:
                 log(f"⚠ 유효 샘플 {len(X)}개 — 너무 적습니다. "
                     "DOE 생성으로 60개 이상 확보 권장.")
                 return None
-            mdl, sc, met, _ = train_surrogate(X, Y)
-            save(mdl, sc, surro)
+            skipped = [k for k in spec if k not in ykeys]
+            if skipped:
+                log(f"ℹ DE 탐색 제외(FEM 검증에서만 평가·반영): "
+                    f"{', '.join(skipped)}")
+            mdl, sc, met, _ = train_surrogate(X, Y, y_keys=ykeys)
+            save(mdl, sc, surro, y_keys=ykeys)
+            if "efficiency" in ykeys:
+                log("ℹ 데이터셋에 efficiency 포함 → DE 탐색이 효율도 직접 최적화")
             obj = SurrogateObjective(surro, bounds, spec=spec)
             log(f"DE 최적화 (샘플 {len(X)}, δ*={delta:.1f}°, "
                 f"I={irms:.2f}A)...")
