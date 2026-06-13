@@ -223,10 +223,32 @@ class MainWindow(QMainWindow):
             self.sp_rpm.setValue(float(v["BaseRPM"]))
         if v.get("I_rms"):
             self.sp_irms.setValue(float(v["I_rms"]))
+        if v.get("Zc"):
+            self.sp_turns.setValue(float(v["Zc"]))   # aedt 턴수로 초기화
         if not self._autofill_spec_from_dataset():
             self._reset_spec_defaults()        # 메타 없으면 기본값 복원
         self._refresh_geometry()
         self.statusBar().showMessage(f"{os.path.basename(path)} 로드 완료")
+
+    def _apply_turns(self):
+        """턴수(Zc) 입력을 모델 변수·변수표에 일괄 반영.
+
+        Zc는 독립 변수이고 다른 수식이 참조하지 않으므로 안전하게 덮어쓴다.
+        variables_raw(=DOE·액티브러닝의 vary가 재해석), variables(=부하스윕),
+        변수표(=current_raw가 읽는 무부하·부하 해석)를 모두 동기화해 모든
+        해석이 같은 턴수를 쓰게 한다."""
+        if self.model is None:
+            return
+        zc = int(round(self.sp_turns.value()))
+        self.model["variables_raw"]["Zc"] = str(zc)
+        self.model["variables"]["Zc"] = float(zc)
+        for i in range(self.tbl_vars.rowCount()):
+            if self.tbl_vars.item(i, 0).text() == "Zc":
+                self.tbl_vars.item(i, 1).setText(str(zc))
+                it2 = self.tbl_vars.item(i, 2)
+                if it2 is not None:
+                    it2.setText(f"{float(zc):.6g}")
+                break
 
     def current_raw(self):
         raw = dict(self.model["variables_raw"])
@@ -376,6 +398,11 @@ class MainWindow(QMainWindow):
         self.sp_strands.setDecimals(0); self.sp_strands.setValue(11)
         self.sp_tcu = QDoubleSpinBox(); self.sp_tcu.setRange(-40, 250)
         self.sp_tcu.setDecimals(0); self.sp_tcu.setValue(80)
+        self.sp_turns = QDoubleSpinBox(); self.sp_turns.setRange(1, 500)
+        self.sp_turns.setDecimals(0); self.sp_turns.setValue(15)
+        self.sp_turns.setToolTip(
+            "코일당 턴수 (Maxwell의 도체수 Zc). aedt 값으로 자동 설정되며, "
+            "여기서 바꾸면 무부하·부하·스윕·DOE 모든 해석에 반영됩니다.")
         self.cb_ibase = QComboBox()
         self.cb_ibase.addItems(["상전류 (권선)", "선간전류 · Y결선",
                                 "선간전류 · Δ결선"])
@@ -390,13 +417,15 @@ class MainWindow(QMainWindow):
                 [("속도 [rpm]", self.sp_rpm),
                  ("나동선 지름 [mm]", self.sp_dcu),
                  ("가닥수", self.sp_strands),
-                 ("권선온도 [°C]", self.sp_tcu)]):
+                 ("권선온도 [°C]", self.sp_tcu),
+                 ("턴수 (Zc)", self.sp_turns)]):
             g.addWidget(QLabel(lbl), 2, col)
             g.addWidget(w_, 3, col)
         self.lbl_iconv = QLabel()
         g.addWidget(self.lbl_iconv, 4, 0, 1, 4)
         self.sp_irms.valueChanged.connect(self._update_iconv)
         self.cb_ibase.currentIndexChanged.connect(self._update_iconv)
+        self.sp_turns.valueChanged.connect(self._apply_turns)
         self._update_iconv()
         b3 = QPushButton("▶ 부하 스윕 실행 (γ 캘리브레이션 포함 — 수 분 소요)")
         b3.clicked.connect(self.run_load_sweep)
@@ -462,7 +491,11 @@ class MainWindow(QMainWindow):
                    "B_max": float(res.Bmag.max()),
                    "T_mNm": T * 1e3}
             log(f"수렴 {res.iterations}회 | Az±{met['Az_max']:.4f} Wb/m | "
-                f"|B|max {met['B_max']:.2f} T | T {met['T_mNm']:.1f} mNm")
+                f"|B|max {met['B_max']:.2f} T | T {met['T_mNm']:.1f} mNm"
+                + (" (Arkkio 단일포지션·과대추정)" if load else ""))
+            if load:
+                log("ℹ 이 토크는 Arkkio 단일포지션(+4~7% 바이어스). Maxwell과 "
+                    "비교·검증은 아래 '부하 스윕'의 T_avg(가상일 1주기 평균)을 쓰세요.")
             return s, res, met
 
         self._spawn(job, self.log_solve.appendPlainText, self._solve_done)
@@ -566,7 +599,8 @@ class MainWindow(QMainWindow):
                       colors="k", linewidths=.3)
         self.fig_field.colorbar(tp, ax=ax, shrink=.8, label="|B| [T]")
         ax.set_aspect("equal")
-        ax.set_title(f"{met['mode']} — T={met['T_mNm']:.1f} mNm, "
+        tnote = " (Arkkio·과대)" if met["mode"] == "부하" else ""
+        ax.set_title(f"{met['mode']} — T={met['T_mNm']:.1f} mNm{tnote}, "
                      f"|B|max {met['B_max']:.2f} T")
         self.cv_field.draw()
 
