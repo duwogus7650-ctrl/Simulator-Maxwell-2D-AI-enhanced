@@ -225,6 +225,13 @@ class MainWindow(QMainWindow):
             self.sp_irms.setValue(float(v["I_rms"]))
         if v.get("Zc"):
             self.sp_turns.setValue(float(v["Zc"]))   # aedt 턴수로 초기화
+        try:                                          # aedt 적층계수로 초기화
+            from motoropt.aedt_parser import detect_material_names
+            steel, _ = detect_material_names(self.model)
+            self.sp_stack.setValue(float(
+                self.model["materials"][steel].get("stacking_factor", 1.0)))
+        except Exception:
+            self.sp_stack.setValue(1.0)
         if not self._autofill_spec_from_dataset():
             self._reset_spec_defaults()        # 메타 없으면 기본값 복원
         self._refresh_geometry()
@@ -249,6 +256,23 @@ class MainWindow(QMainWindow):
                 if it2 is not None:
                     it2.setText(f"{float(zc):.6g}")
                 break
+
+    def _apply_stack(self):
+        """적층계수(점적률)를 강판 재질에 반영 — 철심 BH에만 적용(EMF 불변).
+
+        solver_ms(무부하·부하)·sweep_loss(스윕)·doe(DOE) 모두
+        model['materials'][강판]['stacking_factor']를 읽으므로, 여기서 한 번
+        써 두면 전 해석이 같은 적층계수를 쓴다. NuCurve가 B_eff = ks·B +
+        (1−ks)·μ0·H 로 철심 포화를 키운다."""
+        if self.model is None:
+            return
+        from motoropt.aedt_parser import detect_material_names
+        try:
+            steel, _ = detect_material_names(self.model)
+        except Exception:
+            return
+        self.model["materials"][steel]["stacking_factor"] = \
+            float(self.sp_stack.value())
 
     def current_raw(self):
         raw = dict(self.model["variables_raw"])
@@ -403,6 +427,13 @@ class MainWindow(QMainWindow):
         self.sp_turns.setToolTip(
             "코일당 턴수 (Maxwell의 도체수 Zc). aedt 값으로 자동 설정되며, "
             "여기서 바꾸면 무부하·부하·스윕·DOE 모든 해석에 반영됩니다.")
+        self.sp_stack = QDoubleSpinBox(); self.sp_stack.setRange(0.5, 1.0)
+        self.sp_stack.setDecimals(3); self.sp_stack.setSingleStep(0.01)
+        self.sp_stack.setValue(1.0)
+        self.sp_stack.setToolTip(
+            "적층계수(점적률). 강판 BH에만 적용돼 철심 포화를 키움(EMF는 거의 "
+            "불변). aedt 값으로 자동 설정, 없으면 1.0. Maxwell이 0.97을 썼다면 "
+            "0.97 입력. 무부하·부하·스윕·DOE 모든 해석에 반영됩니다.")
         self.cb_ibase = QComboBox()
         self.cb_ibase.addItems(["상전류 (권선)", "선간전류 · Y결선",
                                 "선간전류 · Δ결선"])
@@ -418,18 +449,20 @@ class MainWindow(QMainWindow):
                  ("나동선 지름 [mm]", self.sp_dcu),
                  ("가닥수", self.sp_strands),
                  ("권선온도 [°C]", self.sp_tcu),
-                 ("턴수 (Zc)", self.sp_turns)]):
+                 ("턴수 (Zc)", self.sp_turns),
+                 ("적층계수", self.sp_stack)]):
             g.addWidget(QLabel(lbl), 2, col)
             g.addWidget(w_, 3, col)
         self.lbl_iconv = QLabel()
-        g.addWidget(self.lbl_iconv, 4, 0, 1, 4)
+        g.addWidget(self.lbl_iconv, 4, 0, 1, 6)
         self.sp_irms.valueChanged.connect(self._update_iconv)
         self.cb_ibase.currentIndexChanged.connect(self._update_iconv)
         self.sp_turns.valueChanged.connect(self._apply_turns)
+        self.sp_stack.valueChanged.connect(self._apply_stack)
         self._update_iconv()
         b3 = QPushButton("▶ 부하 스윕 실행 (γ 캘리브레이션 포함 — 수 분 소요)")
         b3.clicked.connect(self.run_load_sweep)
-        g.addWidget(b3, 5, 0, 1, 4)
+        g.addWidget(b3, 5, 0, 1, 6)
         left.addWidget(grp)
         self.log_solve = QPlainTextEdit(); self.log_solve.setReadOnly(True)
         left.addWidget(self.log_solve, 1)
@@ -461,7 +494,9 @@ class MainWindow(QMainWindow):
             v = resolve_variables(raw)
             geo = build_motor(v, style)
             steel, magnet = detect_material_names(model)
-            log(f"재질: 강판={steel} / 자석={magnet}")
+            _ks = model["materials"][steel].get("stacking_factor", 1.0)
+            log(f"재질: 강판={steel} / 자석={magnet}"
+                + (f" / 적층계수 {_ks:.3f}" if _ks < 1.0 else ""))
             log("형상/메시 생성...")
             sbm = SlidingBandMesh(geo, n_band=2880)
             s = Magnetostatic2D(sbm.merge(0.0), model["materials"],
@@ -543,7 +578,9 @@ class MainWindow(QMainWindow):
             m2 = dict(model); m2["variables"] = v
             steel, magnet = detect_material_names(m2)
             ini = math.degrees(v.get("ini_pos", 0.0))
-            log(f"재질: 강판={steel} / 자석={magnet}")
+            _ks = model["materials"][steel].get("stacking_factor", 1.0)
+            log(f"재질: 강판={steel} / 자석={magnet}"
+                + (f" / 적층계수 {_ks:.3f}" if _ks < 1.0 else ""))
             R_in = rph
             if R_in is None:
                 from motoropt.winding import phase_resistance
