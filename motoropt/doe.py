@@ -207,9 +207,15 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
         Tvw = (np.gradient(Wc, th)
                - np.sum(lam3 * np.gradient(i3, th, axis=0), axis=1))
         Tvw = Tvw[1:-1]                       # 가드 제거 → 정확히 1주기
-        out["T_avg"] = float(np.mean(Tvw) * 1e3)
-        out["ripple_pct"] = float((Tvw.max() - Tvw.min()) / np.mean(Tvw) * 100)
-        out["T_arkkio"] = float(np.mean(np.asarray(Ta)[1:-1]) * 1e3)
+        Ta_in = np.asarray(Ta)[1:-1]          # Arkkio 파형 (리플용)
+        out["T_avg"] = float(np.mean(Tvw) * 1e3)         # 평균은 가상일(정확)
+        out["T_arkkio"] = float(np.mean(Ta_in) * 1e3)
+        # 리플은 Arkkio 직접적분 파형에서 — 코에너지 미분(Tvw)은 노이즈가 커
+        # 서로게이트 학습 불가(R²<0). Arkkio 파형이 매끄러워 학습성이 좋다.
+        out["ripple_pct"] = float(
+            (Ta_in.max() - Ta_in.min()) / np.mean(Ta_in) * 100)
+        out["ripple_pct_vw"] = float(
+            (Tvw.max() - Tvw.min()) / np.mean(Tvw) * 100)   # 참고용
         out["B_tooth"] = Bt
         out["magnet_area"] = float(sum(p.area for p, _, _ in geo.magnets))
 
@@ -226,7 +232,7 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
                 ip = v.get("ini_pos", 0.0)
                 ini = math.degrees(ip) if isinstance(ip, (int, float)) else 0.0
                 cal = calibrate_gamma(m2, style, rpm=rpm_use, I_rms=Irms_ph,
-                                      n_steps=6, init_pos_deg=ini)
+                                      n_steps=4, init_pos_deg=ini)  # γ*는 강건,4로 단축
                 sw = sweep_load_with_fields(
                     m2, style, rpm=rpm_use, I_rms=Irms_ph,
                     gamma_deg=cal["gamma_max_deg"], n_steps=36,
@@ -240,6 +246,8 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
                 out["efficiency"] = float(rr["efficiency"])
                 out["P_fe"] = float(rr["P_fe"])
                 out["P_cu"] = float(rr["P_cu"])
+                # 리플은 36스텝 전주기 스윕값으로 대체(8스텝 base보다 정밀, 공짜)
+                out["ripple_pct"] = float(rr["T_ripple_pct"])
     except Exception as e:  # noqa: BLE001
         out["status"] = f"fail: {type(e).__name__}: {e}"
     return out
