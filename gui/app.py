@@ -857,13 +857,17 @@ class MainWindow(QMainWindow):
             log(f"✅ DOE 완료: 유효 {n_ok} / 실패 {n_fail} → "
                 f"{os.path.basename(dataset)}\n이제 액티브러닝 1라운드를 "
                 "실행하세요.")
-            return None
+            return n_ok                     # 새로 평가된 설계 수
 
         self._spawn(job, self.log_opt.appendPlainText, self._doe_done,
                     busy_btns=[self.btn_doe, self.btn_active, self.btn_sac],
                     geom_slot=self._on_opt_update, notify="DOE 생성 완료")
 
-    def _doe_done(self, _):
+    def _doe_done(self, n_new):
+        # 새 설계가 실제로 추가됐을 때만 목표값 자동충전 — 0개(이어돌리기·중복
+        # 스킵)면 사용자가 직접 설정한 상/하한치를 덮어쓰지 않는다.
+        if not n_new:
+            return
         if self._autofill_spec_from_dataset():
             self.log_opt.appendPlainText(
                 "ℹ Objective 목표값을 이 모델의 기준 설계 성능으로 갱신했습니다 "
