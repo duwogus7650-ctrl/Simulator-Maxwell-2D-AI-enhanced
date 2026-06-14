@@ -144,6 +144,8 @@ class MainWindow(QMainWindow):
         self.candidates = []       # 최적화 후보 [(D, x, fem)]
         self._workers = []
         self._cur_geom_emit = lambda *a, **k: None   # 잡→GUI 형상/진행 통로
+        self._obj_user_edited = set()    # 사용자가 직접 바꾼 목표 키(자동충전 보존)
+        self._obj_autofilling = False    # 프로그램적 표 갱신 중 플래그
 
         tabs = QTabWidget()
         self.setCentralWidget(tabs)
@@ -249,6 +251,7 @@ class MainWindow(QMainWindow):
                 self.model["materials"][steel].get("stacking_factor", 1.0)))
         except Exception:
             self.sp_stack.setValue(1.0)
+        self._obj_user_edited.clear()          # 새 모델 → 목표 편집표시 초기화
         if not self._autofill_spec_from_dataset():
             self._reset_spec_defaults()        # 메타 없으면 기본값 복원
         self._refresh_geometry()
@@ -359,6 +362,7 @@ class MainWindow(QMainWindow):
             ["사용", "목표 특성", "방향", "하한치 (L)", "타겟값 (T)", "상한치 (U)"])
         self.tbl_obj.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch)
+        self._obj_autofilling = True       # 구성 중 편집신호 무시
         for i, (k, spec, on) in enumerate(rows):
             chk = QTableWidgetItem()
             chk.setFlags(Qt.ItemFlag.ItemIsUserCheckable |
@@ -375,7 +379,7 @@ class MainWindow(QMainWindow):
                 cb.addItem(ko, en)                          # 표시=한글, data=내부값
             cb.setCurrentIndex([e for e, _ in TYPE_KO].index(spec[0]))
             cb.currentIndexChanged.connect(
-                lambda _t, r=i: self._update_obj_row_state(r))
+                lambda _t, r=i: self._on_obj_dir_changed(r))
             self.tbl_obj.setCellWidget(i, 2, cb)
             if spec[0] == "target":
                 vals = {3: spec[1], 4: spec[2], 5: spec[3]}
@@ -386,6 +390,8 @@ class MainWindow(QMainWindow):
                     i, c, QTableWidgetItem(
                         f"{vals[c]:.4g}" if c in vals else ""))
             self._update_obj_row_state(i)
+        self._obj_autofilling = False      # 구성 끝 — 이후 편집은 사용자 것
+        self.tbl_obj.itemChanged.connect(self._on_obj_item_changed)
         lay.addWidget(self.tbl_obj)
         lay.addWidget(QLabel(
             "종합 만족도 D = (∏ dᵢ)^(1/n) — 모든 목표를 동시에 만족할수록 1에 "
@@ -905,18 +911,41 @@ class MainWindow(QMainWindow):
             it.setBackground(QColor("#e8e8e8"))
             it.setToolTip("최대화·최소화에서는 사용 안 함")
 
+    def _on_obj_item_changed(self, item):
+        """사용자가 L/T/U 셀을 직접 고치면 그 목표를 '편집됨'으로 표시 —
+        이후 자동충전이 덮어쓰지 않는다."""
+        if self._obj_autofilling or item.column() not in (3, 4, 5):
+            return
+        nm = self.tbl_obj.item(item.row(), 1)
+        if nm is not None and nm.data(Qt.ItemDataRole.UserRole):
+            self._obj_user_edited.add(nm.data(Qt.ItemDataRole.UserRole))
+
+    def _on_obj_dir_changed(self, r):
+        self._update_obj_row_state(r)
+        if self._obj_autofilling:
+            return
+        nm = self.tbl_obj.item(r, 1)               # 방향 변경도 사용자 편집
+        if nm is not None and nm.data(Qt.ItemDataRole.UserRole):
+            self._obj_user_edited.add(nm.data(Qt.ItemDataRole.UserRole))
+
     def _set_obj_row(self, key: str, spec: tuple):
+        if key in self._obj_user_edited:           # 사용자 설정 보존
+            return
         for i in range(self.tbl_obj.rowCount()):
             if self.tbl_obj.item(i, 1).data(Qt.ItemDataRole.UserRole) != key:
                 continue
-            cb = self.tbl_obj.cellWidget(i, 2)
-            cb.setCurrentIndex([e for e, _ in TYPE_KO].index(spec[0]))
-            vals = ({3: spec[1], 4: spec[2], 5: spec[3]}
-                    if spec[0] == "target" else {3: spec[1], 5: spec[2]})
-            for c in (3, 4, 5):
-                self.tbl_obj.setItem(i, c, QTableWidgetItem(
-                    f"{vals[c]:.4g}" if c in vals else ""))
-            self._update_obj_row_state(i)
+            self._obj_autofilling = True           # 프로그램적 갱신(편집표시 안 함)
+            try:
+                cb = self.tbl_obj.cellWidget(i, 2)
+                cb.setCurrentIndex([e for e, _ in TYPE_KO].index(spec[0]))
+                vals = ({3: spec[1], 4: spec[2], 5: spec[3]}
+                        if spec[0] == "target" else {3: spec[1], 5: spec[2]})
+                for c in (3, 4, 5):
+                    self.tbl_obj.setItem(i, c, QTableWidgetItem(
+                        f"{vals[c]:.4g}" if c in vals else ""))
+                self._update_obj_row_state(i)
+            finally:
+                self._obj_autofilling = False
             return
 
     def _reset_spec_defaults(self):
