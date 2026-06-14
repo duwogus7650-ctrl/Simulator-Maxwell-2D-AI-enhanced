@@ -50,55 +50,86 @@ SPEC_EXTRA = {
 _D_FUNCS = {"larger": d_larger, "smaller": d_smaller, "target": d_target}
 
 
+def _hard_pass(y, typ: str, *bnds) -> np.ndarray:
+    """하드(필수) 제약 통과여부 → 0/1. 만족하면 1, 어기면 0(설계 탈락).
+
+    larger: y≥L(하한 필수) / smaller: y≤U(상한 필수) /
+    target: L≤y≤U(범위 필수). bnds=(L,U) 또는 (L,T,U)."""
+    y = np.asarray(y, float)
+    if typ == "larger":
+        return (y >= bnds[0]).astype(float)
+    if typ == "smaller":
+        return (y <= bnds[-1]).astype(float)
+    if typ == "target":
+        return ((y >= bnds[0]) & (y <= bnds[-1])).astype(float)
+    return np.ones_like(y)
+
+
 def desirability(Y: np.ndarray, spec: dict | None = None,
-                 y_keys: list | None = None) -> np.ndarray:
+                 y_keys: list | None = None,
+                 hard_keys: set | None = None) -> np.ndarray:
     """Y: (n, len(y_keys)) 응답 행렬 → D (n,).
 
-    spec의 키 중 y_keys(기본 Y_KEYS)에 있는 응답만 기하평균에 참여한다.
+    spec의 키 중 y_keys(기본 Y_KEYS)에 있는 응답만 참여.
+    hard_keys: 하드 제약 키 — 만족하면 1, 어기면 0(곱)으로 들어가 탈락시킴.
+    나머지(소프트)는 만족도 램프의 기하평균. D = 소프트기하평균 × Π(하드 0/1).
     """
     spec = spec or SPEC
     y_keys = y_keys or Y_KEYS
+    hard_keys = hard_keys or set()
     Y = np.atleast_2d(np.asarray(Y, float))
-    D = np.ones(Y.shape[0])
-    n = 0
+    soft = np.ones(Y.shape[0])
+    hard = np.ones(Y.shape[0])
+    n_soft = n_hard = 0
     for j, k in enumerate(y_keys):
         if k not in spec:
             continue
         s = spec[k]
-        D = D * _D_FUNCS[s[0]](Y[:, j], *s[1:])
-        n += 1
-    if n == 0:
+        if k in hard_keys:
+            hard = hard * _hard_pass(Y[:, j], s[0], *s[1:]); n_hard += 1
+        else:
+            soft = soft * _D_FUNCS[s[0]](Y[:, j], *s[1:]); n_soft += 1
+    if n_soft + n_hard == 0:
         raise ValueError("스펙에 서로게이트 응답(y_keys)이 하나도 없음")
-    return D ** (1.0 / n)
+    D_soft = soft ** (1.0 / n_soft) if n_soft else np.ones(Y.shape[0])
+    return D_soft * hard
 
 
-def desirability_from_dict(resp: dict, spec: dict) -> float:
+def desirability_from_dict(resp: dict, spec: dict,
+                           hard_keys: set | None = None) -> float:
     """응답 dict + spec → 종합 만족도 D.
 
-    spec 키 중 resp에 실제로 존재하는 응답만 기하평균에 참여한다
-    (서로게이트 Y_KEYS에 없는 efficiency 등 FEM 응답도 포함 가능).
+    spec 키 중 resp에 실제로 존재하는 응답만 참여(efficiency 등 FEM 응답 포함).
+    hard_keys: 하드 제약 — 어기면 D=0(탈락).
     """
+    hard_keys = hard_keys or set()
     ds = []
+    hard = 1.0
     for k, s in spec.items():
         if k in resp and resp[k] is not None:
-            ds.append(float(_D_FUNCS[s[0]](np.array([resp[k]], float),
-                                           *s[1:])[0]))
-    if not ds:
+            if k in hard_keys:
+                hard *= float(_hard_pass([resp[k]], s[0], *s[1:])[0])
+            else:
+                ds.append(float(_D_FUNCS[s[0]](np.array([resp[k]], float),
+                                               *s[1:])[0]))
+    if not ds and not hard_keys:
         return 0.0
-    return float(np.prod(ds) ** (1.0 / len(ds)))
+    D_soft = float(np.prod(ds) ** (1.0 / len(ds))) if ds else 1.0
+    return D_soft * hard
 
 
 class SurrogateObjective:
     """정규화 입력 u∈[0,1]^5 → D. RL/GA 공용 평가기."""
 
     def __init__(self, bundle_path: str, bounds: dict,
-                 spec: dict | None = None):
+                 spec: dict | None = None, hard_keys: set | None = None):
         import joblib
         b = joblib.load(bundle_path)
         self.model, self.mu, self.sd = b["model"], b["mu"], b["sd"]
         self.keys = b["x_keys"]
         self.y_keys = b.get("y_keys", Y_KEYS)
         self.spec = spec
+        self.hard_keys = hard_keys or set()
         self.lo = np.array([bounds[k][0] for k in self.keys])
         self.hi = np.array([bounds[k][1] for k in self.keys])
 
@@ -111,4 +142,4 @@ class SurrogateObjective:
 
     def D(self, u: np.ndarray) -> np.ndarray:
         return desirability(self.predict(u), spec=self.spec,
-                            y_keys=self.y_keys)
+                            y_keys=self.y_keys, hard_keys=self.hard_keys)

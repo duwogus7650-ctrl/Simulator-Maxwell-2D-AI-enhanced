@@ -97,6 +97,28 @@ read/write에 `encoding="utf-8"`** (surrogate.load_dataset, doe.build_dataset
 read/append, app.py 액티브러닝 append, run_p5_doe·run_p6_active). 로케일·내용
 무관하게 안전. 검증: load_dataset 정상(X(62,5)).
 
+## 9. 라운드 카운터 + 하드 제약(필수) + AI 권장 목표값 (06-15)
+
+- **액티브러닝 라운드 카운터**: `self._active_round`(모델별, 리셋). 버튼·로그·
+  진행바에 "N라운드" 표시(이전엔 매번 "1라운드"). `_cand_done`에 "누적 후보 N개·
+  현재 최고 D=… (라운드 나빠도 최고 유지)" 표시 — 후보는 D순 정렬, 1번이 최고.
+- **하드 제약(필수 🔒) 열**: Objective 표에 7번째 "필수" 체크박스. 체크 시 그 목표는
+  통과/실패(만족하면 1, 어기면 D=0 탈락), 소프트는 기존 만족도 램프.
+  `objective.py`: `_hard_pass`, `desirability(...,hard_keys)`,
+  `desirability_from_dict(...,hard_keys)`, `SurrogateObjective(hard_keys)`.
+  GUI: `_hard_keys_from_table()`, run_active_round·_update_result·diagnose_result에
+  전달. 예: 토크 7130 필수→ 7130↑면 d=1(토크 램프 패널티 없음)→ 옵티마이저가
+  코깅·리플 최적화에 집중(7300서 D 0.46→0.80). DE 탐색·FEM 검증 모두 하드 반영.
+- **AI 권장 목표값 버튼**: 목표가 빡빡해 D=0일 때, **필수(🔒)는 고정**하고 소프트
+  목표 L/U를 "필수 만족 설계의 DOE 달성범위"로 조정 제안 → QMessageBox로 변경값
+  미리보기 + Yes/No(사용자 선택). 필수 자체가 데이터서 불가능하면 각 필수의 달성
+  범위를 안내(완화/DOE확대 권장). `relax_to_recommended()`.
+- diagnose_result: D=0 원인을 하드 위반/소프트 0점 구분, 'AI 권장 목표값' 버튼 안내.
+
+**최적화 엔진 정리(사용자 질문)**: 서로게이트(MLP 신경망) + **차분진화 DE(진화
+알고리즘)** + 액티브러닝(DE해→FEM검증→재학습 반복). RL 아님(SAC는 미학습 옵션).
+후보 표의 EMF·자석 열은 목표 아닌 **참고 표시값**(체크한 목표만 D에 반영).
+
 ## 6. 미해결/주의
 
 - KRO80 등은 GUI 기본 선경 0.3 → **0.25로 바꿔 입력**해야 효율 맞음.

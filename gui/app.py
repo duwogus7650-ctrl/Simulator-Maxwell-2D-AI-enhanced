@@ -209,34 +209,45 @@ def resp_label(key: str) -> str:
 
 
 def diagnose_result(fem: dict, spec: dict, fem_D: float,
-                    surro_D: float | None = None) -> list:
+                    surro_D: float | None = None,
+                    hard_keys: set | None = None) -> list:
     """결과 자동 진단 — 비전문가도 알 수 있게 경고 리스트 반환.
 
-    (1) D=0 원인: 어느 목표가 만족도 0인지·왜(값 vs 한계).
+    (1) D=0 원인: 어느 목표가 만족도 0인지·왜(값 vs 한계). 하드/소프트 구분.
     (2) AI 과대예측: 서로게이트 D ≫ 실제 FEM D.
     (3) 물리 타당성: 깊은 포화·코깅 과다·Arkkio↔가상일 괴리·비현실 효율.
     솔버가 스스로 '의심스러운 결과'를 표면화해 조용한 오류를 막는다."""
-    from motoropt.objective import _D_FUNCS
+    from motoropt.objective import _D_FUNCS, _hard_pass
+    hard_keys = hard_keys or set()
     out = []
-    zeros = []
+    hard_viol, soft_zeros = [], []
     for k, s in spec.items():
         if k not in fem or fem[k] is None:
             continue
-        d = float(_D_FUNCS[s[0]](np.array([fem[k]], float), *s[1:])[0])
-        if d < 0.02:
-            if s[0] == "larger":
-                why = f"{fem[k]:.4g} < 하한 {s[1]:.4g}"
-            elif s[0] == "smaller":
-                why = f"{fem[k]:.4g} > 상한 {s[-1]:.4g}"
-            else:
-                why = f"{fem[k]:.4g}, 목표 {s[2]:.4g}"
-            zeros.append(f"{RESP_KO.get(k, k)}=0점({why})")
-    if fem_D < 1e-6 and zeros:
-        out.append("⚠ 종합 D=0 원인: " + " · ".join(zeros) +
-                   " → 그 목표의 한계(L/U)를 현실값으로 조정하거나 액티브러닝을 "
-                   "더 돌리세요. (만족도는 곱이라 한 항목만 0이어도 전체 0)")
-    elif zeros:
-        out.append("ℹ 일부 목표 0점: " + " · ".join(zeros) + " (종합엔 미반영)")
+        if s[0] == "larger":
+            why = f"{fem[k]:.4g} < 하한 {s[1]:.4g}"
+        elif s[0] == "smaller":
+            why = f"{fem[k]:.4g} > 상한 {s[-1]:.4g}"
+        else:
+            why = f"{fem[k]:.4g}, 목표 {s[2]:.4g}"
+        if k in hard_keys:
+            if float(_hard_pass([fem[k]], s[0], *s[1:])[0]) < 0.5:
+                hard_viol.append(f"{RESP_KO.get(k, k)} 위반({why})")
+        elif float(_D_FUNCS[s[0]](np.array([fem[k]], float), *s[1:])[0]) < 0.02:
+            soft_zeros.append(f"{RESP_KO.get(k, k)}=0점({why})")
+    if fem_D < 1e-6 and hard_viol:
+        out.append("⚠ 종합 D=0 원인(필수 제약 위반): " + " · ".join(hard_viol) +
+                   " → 이 설계는 🔒필수 조건을 못 지킵니다. 액티브러닝을 더 "
+                   "돌려(AI가 그 영역 학습) 만족하는 설계를 찾거나, 필수가 "
+                   "물리적으로 무리면 'AI 권장 목표값' 버튼으로 나머지(소프트) "
+                   "목표를 풀어 해를 만드세요.")
+    if fem_D < 1e-6 and soft_zeros:
+        out.append("⚠ 종합 D=0 원인: " + " · ".join(soft_zeros) +
+                   " → 'AI 권장 목표값' 버튼으로 한계(L/U)를 현실값으로 조정하거나 "
+                   "액티브러닝을 더 돌리세요. (만족도는 곱이라 한 항목만 0이어도 전체 0)")
+    elif soft_zeros:
+        out.append("ℹ 일부 목표 0점: " + " · ".join(soft_zeros) +
+                   " (종합엔 미반영)")
     if surro_D is not None and surro_D - fem_D > 0.25:
         out.append(f"⚠ AI(서로게이트) 과대예측: 예측 D={surro_D:.3f} → 실제 "
                    f"D={fem_D:.3f}. 학습 덜 된 영역을 골랐을 수 있음 — "
@@ -319,6 +330,7 @@ class MainWindow(QMainWindow):
         self.last_solve = None     # (solver, result, 메트릭 dict)
         self.last_responses = None # 부하 스윕 응답 dict
         self.candidates = []       # 최적화 후보 [(D, x, fem)]
+        self._active_round = 0     # 액티브러닝 라운드 카운터(모델별)
         self._workers = []
         self._cur_geom_emit = lambda *a, **k: None   # 잡→GUI 형상/진행 통로
         self._obj_user_edited = set()    # 사용자가 직접 바꾼 목표 키(자동충전 보존)
@@ -393,6 +405,10 @@ class MainWindow(QMainWindow):
         """모델 전환 시 이전 모델의 해석·최적화 결과를 모두 비운다 —
         다른 aedt를 열었는데 직전 모델 결과가 남는 것 방지."""
         self.candidates = []
+        self._active_round = 0
+        if hasattr(self, "btn_active"):
+            self.btn_active.setText(
+                "▶ 액티브러닝 1라운드 (DE→FEM 검증→재학습)")
         for tbl in (getattr(self, "tbl_cand", None),
                     getattr(self, "tbl_res", None)):
             if tbl is not None:
@@ -553,9 +569,10 @@ class MainWindow(QMainWindow):
         from motoropt.objective import SPEC, SPEC_EXTRA
         rows = [(k, s, True) for k, s in SPEC.items()] + \
                [(k, s, False) for k, s in SPEC_EXTRA.items()]
-        self.tbl_obj = QTableWidget(len(rows), 6)
+        self.tbl_obj = QTableWidget(len(rows), 7)
         self.tbl_obj.setHorizontalHeaderLabels(
-            ["사용", "목표 특성", "방향", "하한치 (L)", "타겟값 (T)", "상한치 (U)"])
+            ["사용", "목표 특성", "방향", "하한치 (L)", "타겟값 (T)",
+             "상한치 (U)", "필수 🔒"])
         self.tbl_obj.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch)
         self._obj_autofilling = True       # 구성 중 편집신호 무시
@@ -585,6 +602,15 @@ class MainWindow(QMainWindow):
                 self.tbl_obj.setItem(
                     i, c, QTableWidgetItem(
                         f"{vals[c]:.4g}" if c in vals else ""))
+            hard = QTableWidgetItem()                       # 필수(하드 제약)
+            hard.setFlags(Qt.ItemFlag.ItemIsUserCheckable |
+                          Qt.ItemFlag.ItemIsEnabled)
+            hard.setCheckState(Qt.CheckState.Unchecked)
+            hard.setToolTip(
+                "체크 = 하드 제약: 이 조건(방향·경계)을 반드시 만족해야 함"
+                "(어기면 그 설계는 탈락=D 0). AI 권장값 조정 시에도 고정되어 "
+                "바뀌지 않고, 나머지(소프트) 목표만 조정됩니다.")
+            self.tbl_obj.setItem(i, 6, hard)
             self._update_obj_row_state(i)
         self._obj_autofilling = False      # 구성 끝 — 이후 편집은 사용자 것
         self.tbl_obj.itemChanged.connect(self._on_obj_item_changed)
@@ -619,6 +645,114 @@ class MainWindow(QMainWindow):
         if not spec:
             raise ValueError("체크된 목표 특성이 없음")
         return spec
+
+    def _hard_keys_from_table(self) -> set:
+        """필수(하드 제약)로 체크된 + 사용 중인 목표 키 집합."""
+        hard = set()
+        for i in range(self.tbl_obj.rowCount()):
+            it6 = self.tbl_obj.item(i, 6)
+            if (self.tbl_obj.item(i, 0).checkState() == Qt.CheckState.Checked
+                    and it6 is not None
+                    and it6.checkState() == Qt.CheckState.Checked):
+                hard.add(self.tbl_obj.item(i, 1)
+                         .data(Qt.ItemDataRole.UserRole))
+        return hard
+
+    def relax_to_recommended(self):
+        """목표가 빡빡해 해가 안 잡힐 때 AI 권장값 제안 — 필수(🔒)는 고정하고
+        소프트 목표의 한계(L/U)를 이 모델 DOE의 '필수 만족 설계' 달성범위로
+        조정. 변경값을 미리 보여주고 적용 여부는 사용자가 선택(수락/거부)."""
+        from PyQt6.QtWidgets import QMessageBox
+        from motoropt.objective import _hard_pass
+        if self.model is None:
+            self.log_opt.appendPlainText("⚠ 먼저 Model 탭에서 aedt를 여세요")
+            return
+        dataset, _ = self._dataset_paths()
+        if not os.path.exists(dataset):
+            QMessageBox.warning(self, "데이터 없음",
+                "이 모델 DOE 데이터가 없습니다. 먼저 'DOE 생성'을 하세요.")
+            return
+        try:
+            spec = self._spec_from_table()
+        except ValueError as e:
+            QMessageBox.warning(self, "목표 없음", str(e)); return
+        hard = self._hard_keys_from_table()
+        oks = []
+        with open(dataset, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                if r.get("status") == "ok":
+                    oks.append(r)
+        if len(oks) < 3:
+            QMessageBox.warning(self, "데이터 부족",
+                f"유효 DOE 설계가 {len(oks)}개뿐입니다. DOE를 더 생성하세요.")
+            return
+
+        def feasible(r):                       # 필수 제약 모두 만족하는 설계?
+            for k in hard:
+                if k in spec and k in r and r[k] is not None:
+                    if float(_hard_pass([r[k]], spec[k][0],
+                                        *spec[k][1:])[0]) < 0.5:
+                        return False
+            return True
+        feas = [r for r in oks if feasible(r)]
+        if hard and not feas:                  # 필수 자체가 데이터서 불가능
+            lines = []
+            for k in hard:
+                vals = [r[k] for r in oks if k in r and r[k] is not None]
+                if vals:
+                    lines.append(f"  · {resp_label(k)}: 데이터 달성범위 "
+                                 f"{min(vals):.4g} ~ {max(vals):.4g}")
+            QMessageBox.warning(self, "필수 제약 불가",
+                "🔒필수 제약을 동시에 만족하는 설계가 데이터에 없습니다.\n"
+                "필수가 너무 빡빡하거나 DOE 탐색범위 밖입니다 — 필수 경계를 "
+                "아래 범위 안으로 완화하거나 DOE 범위를 넓히세요.\n\n"
+                + "\n".join(lines))
+            return
+        pool = feas or oks                     # 필수 만족 설계 기준(없으면 전체)
+        recs, preview = {}, []
+        for i in range(self.tbl_obj.rowCount()):
+            if self.tbl_obj.item(i, 0).checkState() != Qt.CheckState.Checked:
+                continue
+            k = self.tbl_obj.item(i, 1).data(Qt.ItemDataRole.UserRole)
+            if k in hard:
+                preview.append(f"  🔒 {resp_label(k)}: 고정(유지)")
+                continue
+            if k not in spec:
+                continue
+            vals = [r[k] for r in pool if k in r and r[k] is not None]
+            if len(vals) < 3:
+                continue
+            lo, hi = float(min(vals)), float(max(vals))
+            if hi - lo < abs(lo) * 1e-3 + 1e-9:
+                lo, hi = lo * 0.98 - 1e-6, hi * 1.02 + 1e-6
+            cur = spec[k]
+            recs[k] = ((cur[0], lo, cur[2], hi) if cur[0] == "target"
+                       else (cur[0], lo, hi))
+            preview.append(f"  · {resp_label(k)}: "
+                           f"[{cur[1]:.4g}, {cur[-1]:.4g}] → [{lo:.4g}, {hi:.4g}]")
+        if not recs:
+            QMessageBox.information(self, "조정할 목표 없음",
+                "조정 가능한 소프트 목표가 없습니다(모두 필수이거나 데이터 부족).")
+            return
+        msg = ("필수(🔒)는 고정하고, 아래 소프트 목표의 한계를 이 모델 데이터의 "
+               "달성 가능 범위로 조정합니다"
+               + (f" (🔒필수 만족 설계 {len(feas)}개 기준)" if hard else "")
+               + ".\n적용하시겠습니까?\n\n" + "\n".join(preview))
+        if QMessageBox.question(self, "AI 권장 목표값", msg) != \
+                QMessageBox.StandardButton.Yes:
+            self.log_opt.appendPlainText("ℹ AI 권장 목표값 — 취소(변경 없음)")
+            return
+        for k, s in recs.items():
+            self._set_obj_row(k, s)
+            self._obj_user_edited.discard(k)
+        self.log_opt.appendPlainText(
+            "🎯 AI 권장 목표값 적용: "
+            + ", ".join(resp_label(k) for k in recs)
+            + " → 이제 액티브러닝을 다시 돌리세요.")
 
     # ---------------------------------------------------------- ③ Solve
     def _tab_solve(self):
@@ -891,6 +1025,14 @@ class MainWindow(QMainWindow):
         self.btn_sac = QPushButton("▶ SAC 정책으로 현재 설계 개선 (24스텝)")
         self.btn_sac.clicked.connect(self.run_sac_improve)
         left.addWidget(self.btn_active); left.addWidget(self.btn_sac)
+        self.btn_relax = QPushButton(
+            "🎯 목표가 안 잡힐 때: AI 권장 목표값으로 조정")
+        self.btn_relax.setToolTip(
+            "필수(🔒)는 고정하고, 나머지(소프트) 목표의 한계(L/U)를 이 모델 "
+            "DOE 데이터의 달성 가능 범위로 바꿔 D>0 해가 존재하게 만듭니다. "
+            "적용 전 변경값을 보여주고, 적용 여부는 직접 선택합니다.")
+        self.btn_relax.clicked.connect(self.relax_to_recommended)
+        left.addWidget(self.btn_relax)
         self.pb_opt = QProgressBar(); self.pb_opt.setRange(0, 100)
         self.pb_opt.setValue(0); self.pb_opt.setFormat("%p% — 대기")
         left.addWidget(self.pb_opt)
@@ -1221,6 +1363,11 @@ class MainWindow(QMainWindow):
         except ValueError as e:
             self.log_opt.appendPlainText(f"⚠ {e}")
             return
+        hard = self._hard_keys_from_table()        # 필수(하드) 제약 키
+        self._active_round += 1
+        rnd = self._active_round
+        self.btn_active.setText(
+            f"▶ 액티브러닝 {rnd}라운드 (DE→FEM 검증→재학습)")
         dataset, surro = self._dataset_paths()
         bounds, delta, irms = self._load_meta()
         # 효율이 목표에 있으면 부하 스윕까지 평가 — Solve 탭 운전조건 사용
@@ -1246,6 +1393,7 @@ class MainWindow(QMainWindow):
                     "서로게이트 최적화는 모델별 DOE(P5, scripts/run_p5_doe.py)가 "
                     "선행되어야 합니다 — 현재 400W 모델만 데이터 보유.")
                 return None
+            log(f"━━━━━━━━━━ 액티브러닝 {rnd}라운드 ━━━━━━━━━━")
             log(f"서로게이트 재학습... ({os.path.basename(dataset)})")
             X, Y, ykeys = load_dataset(dataset)
             if len(X) < 20:
@@ -1256,6 +1404,9 @@ class MainWindow(QMainWindow):
             if skipped:
                 log(f"ℹ DE 탐색 제외(FEM 검증에서만 평가·반영): "
                     f"{', '.join(skipped)}")
+            if hard:
+                log(f"🔒 하드 제약(반드시 만족): "
+                    f"{', '.join(resp_label(k) for k in hard)}")
             mdl, sc, met, _ = train_surrogate(X, Y, y_keys=ykeys)
             save(mdl, sc, surro, y_keys=ykeys)
             if "efficiency" in ykeys:
@@ -1263,7 +1414,7 @@ class MainWindow(QMainWindow):
             t0 = time.time()
             emit = self._cur_geom_emit
             emit({"frac": 0.10, "info": "서로게이트 학습 완료 → DE 탐색"})
-            obj = SurrogateObjective(surro, bounds, spec=spec)
+            obj = SurrogateObjective(surro, bounds, spec=spec, hard_keys=hard)
             log(f"DE 최적화 (샘플 {len(X)}, δ*={delta:.1f}°, "
                 f"I={irms:.2f}A)...")
             maxit = 250
@@ -1275,7 +1426,8 @@ class MainWindow(QMainWindow):
                 frac = 0.10 + 0.65 * min(gi / maxit, 1.0)
                 xd_i = dict(zip(X_KEYS, map(float, obj.x_of(xk))))
                 emit({"x": xd_i, "frac": frac,
-                      "info": f"DE 탐색 {gi}세대  D={float(obj.D(xk)[0]):.3f}"})
+                      "info": f"{rnd}R · DE {gi}세대  "
+                              f"D={float(obj.D(xk)[0]):.3f}"})
                 # DE는 서로게이트(빠름)라 수 초에 수렴 → 형상 모핑이 안 보임.
                 # 시각화를 위해 세대마다 살짝 늦춰 변형 과정을 눈으로 보이게 함.
                 time.sleep(0.05)
@@ -1300,17 +1452,18 @@ class MainWindow(QMainWindow):
                 emit({"frac": 1.0, "info": "FEM 실패"})
                 log(f"FEM 실패: {fem['status'][:40]}")
                 return None
-            D = desirability_from_dict(fem, spec)   # efficiency 포함 검증 D
-            emit({"x": xd, "frac": 1.0, "info": f"완료 D={D:.3f}"})
+            D = desirability_from_dict(fem, spec, hard_keys=hard)   # 검증 D
+            emit({"x": xd, "frac": 1.0, "info": f"{rnd}R 완료 D={D:.3f}"})
             msg = (f"FEM D={D:.4f} | T={fem['T_avg']:.1f} "
                    f"EMF={fem['emf_rms']:.3f} A={fem['magnet_area']:.1f}")
             if "efficiency" in fem:
                 msg += (f" η={fem['efficiency']*100:.1f}% "
                         f"(P_fe {fem['P_fe']:.1f} P_cu {fem['P_cu']:.1f}W)")
             log(msg)
-            for wmsg in diagnose_result(fem, spec, D, surro_D=-r.fun):
+            for wmsg in diagnose_result(fem, spec, D, surro_D=-r.fun,
+                                        hard_keys=hard):
                 log(wmsg)                          # 자동 진단·경고
-            log(f"✅ 액티브러닝 1라운드 완료 (소요 {(time.time()-t0)/60:.1f}분)")
+            log(f"✅ 액티브러닝 {rnd}라운드 완료 (소요 {(time.time()-t0)/60:.1f}분)")
             return (D, xd, fem)
 
         self._spawn(job, self.log_opt.appendPlainText, self._cand_done,
@@ -1386,6 +1539,10 @@ class MainWindow(QMainWindow):
                     f"{xi['W_t']:.3f}", f"{xi['MagnetR']:.3f}"]
             for j, t in enumerate(vals):
                 self.tbl_cand.setItem(i, j, QTableWidgetItem(t))
+        best = self.candidates[0][0]
+        self.log_opt.appendPlainText(
+            f"📊 누적 후보 {len(self.candidates)}개 · 현재 최고 D={best:.4f} "
+            f"(이 최고값이 Result·내보내기에 쓰임 — 라운드가 나빠도 유지됨)")
         self._update_result()
 
     # --------------------------------------------------------- ⑤ Result
@@ -1441,13 +1598,14 @@ class MainWindow(QMainWindow):
     def _update_result(self):
         if not self.candidates or self.geo is None:
             return
-        from motoropt.objective import _D_FUNCS
+        from motoropt.objective import _D_FUNCS, _hard_pass
         D, xd, fem = self.candidates[0]
         base_area = sum(p.area for p, _, _ in self.geo.magnets)
         try:
             spec = self._spec_from_table()      # 사용자가 선택한 목표 항목
+            hard = self._hard_keys_from_table()
         except ValueError:
-            spec = {}
+            spec, hard = {}, set()
         base_row = self._baseline_fem_row()
 
         def base_of(key):                        # 항목별 기준값
@@ -1464,9 +1622,15 @@ class MainWindow(QMainWindow):
             b_txt = f"{b:.4g}" if b is not None else "—"
             if key in fem:                       # FEM 검증된 응답
                 opt = fem[key]
-                d = float(_D_FUNCS[s[0]](np.array([opt], float), *s[1:])[0])
                 pct = f", {(opt / b - 1) * 100:+.1f}%" if b else ""
-                opt_txt = f"{opt:.4g}  (만족도 {d:.2f}{pct})"
+                if key in hard:                  # 🔒 필수 = 통과/위반
+                    ok = float(_hard_pass([opt], s[0], *s[1:])[0]) >= 0.5
+                    opt_txt = (f"{opt:.4g}  (🔒필수 "
+                               f"{'✓ 만족' if ok else '✗ 위반'}{pct})")
+                else:
+                    d = float(_D_FUNCS[s[0]](np.array([opt], float),
+                                             *s[1:])[0])
+                    opt_txt = f"{opt:.4g}  (만족도 {d:.2f}{pct})"
             else:                                # efficiency 등 서로게이트 외
                 opt_txt = "— (Solve 탭 부하 스윕으로 평가)"
             rows.append((name, b_txt, opt_txt))
@@ -1474,7 +1638,7 @@ class MainWindow(QMainWindow):
         for i, r in enumerate(rows):
             for j, t in enumerate(r):
                 self.tbl_res.setItem(i, j, QTableWidgetItem(t))
-        warns = diagnose_result(fem, spec, D)        # 자동 진단 경고
+        warns = diagnose_result(fem, spec, D, hard_keys=hard)   # 자동 진단
         self.lbl_res_warn.setText("\n".join(warns) if warns
                                   else "✓ 자동 점검 통과 — 명백한 이상 없음 "
                                        "(절대값 최종확인은 Maxwell 권장)")
