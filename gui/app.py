@@ -1207,9 +1207,8 @@ class MainWindow(QMainWindow):
             self._set_obj_row("emf_rms", ("target", r0[0], E0, r0[1]))
         if (r0 := rng("magnet_area")):
             self._set_obj_row("magnet_area", ("smaller", r0[0], r0[1]))
-        for k in ("cogging_pp", "Pcu_W"):
-            if (r0 := rng(k)):
-                self._set_obj_row(k, ("smaller", r0[0], r0[1]))
+        if (r0 := rng("cogging_pp")):
+            self._set_obj_row("cogging_pp", ("smaller", r0[0], r0[1]))
         return True
 
     def run_active_round(self):
