@@ -467,6 +467,7 @@ class MainWindow(QMainWindow):
         self._obj_user_edited.clear()          # 새 모델 → 목표 편집표시 초기화
         if not self._autofill_spec_from_dataset():
             self._reset_spec_defaults()        # 메타 없으면 기본값 복원
+        self._fill_bounds_table()              # 설계변수 탐색범위 자동 추정
         self._refresh_geometry()
         self.statusBar().showMessage(f"{os.path.basename(path)} 로드 완료")
 
@@ -646,6 +647,33 @@ class MainWindow(QMainWindow):
         if not spec:
             raise ValueError("체크된 목표 특성이 없음")
         return spec
+
+    def _fill_bounds_table(self):
+        """모델 로드 시 설계변수 탐색범위를 자동 추정값으로 채움(사용자 편집 가능)."""
+        if self.model is None:
+            return
+        from motoropt.doe import bounds_for_model
+        b = bounds_for_model(self.model["variables"])
+        self.tbl_bounds.blockSignals(True)
+        for i, k in enumerate(self._bnd_keys):
+            lo, hi = b[k]
+            self.tbl_bounds.setItem(i, 1, QTableWidgetItem(f"{lo:g}"))
+            self.tbl_bounds.setItem(i, 2, QTableWidgetItem(f"{hi:g}"))
+        self.tbl_bounds.blockSignals(False)
+
+    def _bounds_from_table(self) -> dict:
+        """설계변수 범위 테이블 → {key:(lo,hi)}. 비거나 lo≥hi면 ValueError."""
+        out = {}
+        for i, k in enumerate(self._bnd_keys):
+            try:
+                lo = float(self.tbl_bounds.item(i, 1).text())
+                hi = float(self.tbl_bounds.item(i, 2).text())
+            except (AttributeError, TypeError, ValueError):
+                raise ValueError(f"설계변수 '{k}' 범위가 비었거나 숫자가 아님")
+            if lo >= hi:
+                raise ValueError(f"설계변수 '{k}' 최소({lo}) ≥ 최대({hi})")
+            out[k] = (lo, hi)
+        return out
 
     def _hard_keys_from_table(self) -> set:
         """필수(하드 제약)로 체크된 + 사용 중인 목표 키 집합."""
@@ -1015,10 +1043,28 @@ class MainWindow(QMainWindow):
         self.sp_ndoe.setDecimals(0); self.sp_ndoe.setValue(60)
         g.addWidget(QLabel("설계 수 (권장 60+, 설계당 ~20초)"), 0, 0)
         g.addWidget(self.sp_ndoe, 1, 0)
+        g.addWidget(QLabel("설계변수 탐색 범위 — 현실적 범위로 직접 조정 "
+                           "(모델 열면 자동 추정값, 길이는 mm)"), 2, 0)
+        self._bnd_keys = ["a_m", "T_m", "T_m2_ratio", "W_t", "MagnetR"]
+        _bnd_lbl = {"a_m": "a_m (자석호각)", "T_m": "T_m [mm] (자석두께)",
+                    "T_m2_ratio": "T_m2_ratio (자석호)", "W_t": "W_t [mm] (치폭)",
+                    "MagnetR": "MagnetR [mm] (자석R)"}
+        self.tbl_bounds = QTableWidget(len(self._bnd_keys), 3)
+        self.tbl_bounds.setHorizontalHeaderLabels(["변수", "최소", "최대"])
+        self.tbl_bounds.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch)
+        self.tbl_bounds.verticalHeader().setVisible(False)
+        self.tbl_bounds.setMaximumHeight(196)
+        for i, k in enumerate(self._bnd_keys):
+            it = QTableWidgetItem(_bnd_lbl[k])
+            it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            it.setData(Qt.ItemDataRole.UserRole, k)
+            self.tbl_bounds.setItem(i, 0, it)
+        g.addWidget(self.tbl_bounds, 3, 0)
         self.btn_doe = QPushButton("▶ DOE 생성 (전류는 Solve 탭 상전류 사용)")
         self.btn_doe.setObjectName("go")
         self.btn_doe.clicked.connect(self.run_doe_build)
-        g.addWidget(self.btn_doe, 2, 0)
+        g.addWidget(self.btn_doe, 4, 0)
         left.addWidget(grp)
         self.btn_active = QPushButton("▶ 액티브러닝 1라운드 (DE→FEM 검증→재학습)")
         self.btn_active.setObjectName("primary")
@@ -1110,6 +1156,11 @@ class MainWindow(QMainWindow):
             return
         model, style = self.model, self.style
         n = int(self.sp_ndoe.value())
+        try:
+            user_bounds = self._bounds_from_table()      # 사용자 설계변수 범위
+        except ValueError as e:
+            self.log_opt.appendPlainText(f"⚠ {e}")
+            return
         irms, i_note = self._phase_current()
         if i_note:
             self.log_opt.appendPlainText(i_note)
@@ -1139,8 +1190,8 @@ class MainWindow(QMainWindow):
                 return None
             v = model["variables"]
             steel, mag = detect_material_names(model)
-            bounds = bounds_for_model(v)
-            log("설계변수 범위: " + ", ".join(
+            bounds = user_bounds or bounds_for_model(v)   # 사용자 범위 우선
+            log("설계변수 범위(사용자 지정): " + ", ".join(
                 f"{k} {lo:g}~{hi:g}" for k, (lo, hi) in bounds.items()))
             log(f"δ 캘리브레이션 (4점, {irms:.2f} Arms)...")
             delta = calibrate_delta(model, style, I_rms=irms,
