@@ -1027,10 +1027,12 @@ class MainWindow(QMainWindow):
                 st["g"] += 1
                 gi = st["g"]
                 frac = 0.10 + 0.65 * min(gi / maxit, 1.0)
-                if gi % 3 == 0 or gi == 1:
-                    xd_i = dict(zip(X_KEYS, map(float, obj.x_of(xk))))
-                    emit({"x": xd_i, "frac": frac,
-                          "info": f"DE 탐색 {gi}세대  D={float(obj.D(xk)[0]):.3f}"})
+                xd_i = dict(zip(X_KEYS, map(float, obj.x_of(xk))))
+                emit({"x": xd_i, "frac": frac,
+                      "info": f"DE 탐색 {gi}세대  D={float(obj.D(xk)[0]):.3f}"})
+                # DE는 서로게이트(빠름)라 수 초에 수렴 → 형상 모핑이 안 보임.
+                # 시각화를 위해 세대마다 살짝 늦춰 변형 과정을 눈으로 보이게 함.
+                time.sleep(0.05)
 
             r = differential_evolution(lambda u: -obj.D(u)[0],
                                        [(0, 1)] * 5, seed=0,
