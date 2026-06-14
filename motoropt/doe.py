@@ -256,7 +256,8 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
             T_Nm = out["T_avg"] / 1000.0
             if Iph > 0 and T_Nm > 0:
                 pcu = 3.0 * Iph ** 2 * rph                  # 현 전류 동손 [W]
-                out["Pcu_per_Nm2"] = float(pcu / T_Nm ** 2)  # 동손/토크² [W/Nm²]
+                out["Pcu_W"] = float(pcu)                     # 운전점 동손 [W]
+                out["Pcu_per_Nm2"] = float(pcu / T_Nm ** 2)  # 동손/토크² [W/Nm²]참고
                 out["I_per_Nm"] = float(Iph / T_Nm)          # 전류/토크 [A/Nm]참고
                 out["R_ph_ohm"] = float(rph)
 

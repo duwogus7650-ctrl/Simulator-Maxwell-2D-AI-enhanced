@@ -61,19 +61,142 @@ for _name in ("Malgun Gothic", "NanumGothic", "AppleGothic"):
         matplotlib.rcParams["font.family"] = _name
         break
 matplotlib.rcParams["axes.unicode_minus"] = False
+# 다크 엔지니어링 테마 — 모든 Figure/Axes가 rcParams를 상속하므로
+# 그리기 코드를 건드리지 않고 캔버스 배경·축·눈금을 어둡게 통일한다.
+matplotlib.rcParams.update({
+    "figure.facecolor": "#111a2b", "savefig.facecolor": "#111a2b",
+    "axes.facecolor": "#0c1322", "axes.edgecolor": "#2a3a59",
+    "axes.labelcolor": "#cdd7e6", "text.color": "#cdd7e6",
+    "xtick.color": "#8896ad", "ytick.color": "#8896ad",
+    "axes.titlecolor": "#36cdd6", "grid.color": "#1d2a44",
+})
 from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
+
+# ── 다크 엔지니어링 테마 (mini motor-cad 스타일: 네이비 + 시안) ──────────
+#   BG_APP 가장 어두움 / BG_PANEL 패널 / BG_INPUT 입력칸 / 시안 강조 / 호박색 경고
+DARK_QSS = """
+* { font-family: "Segoe UI", "Malgun Gothic", sans-serif; font-size: 13px;
+    color: #cdd7e6; }
+QMainWindow, QWidget { background: #0b0f1a; }
+QToolTip { background: #111a2b; color: #cdd7e6; border: 1px solid #2a3a59; }
+
+/* 상단 헤더 바 */
+#Header { background: #0d1424; border-bottom: 2px solid #15324a; }
+#HeaderTitle { font-size: 19px; font-weight: 700; letter-spacing: 1px; }
+#HeaderSub  { color: #6f7f99; font-size: 11px; letter-spacing: 2px; }
+
+/* 탭 */
+QTabWidget::pane { border: 1px solid #1d2a44; background: #0b0f1a; top: -1px; }
+QTabBar::tab {
+    background: #0d1424; color: #7e8da6; padding: 9px 22px;
+    border: 1px solid #15203a; border-bottom: none;
+    margin-right: 2px; font-weight: 600; }
+QTabBar::tab:selected {
+    background: #111c30; color: #36cdd6;
+    border-top: 2px solid #36cdd6; }
+QTabBar::tab:hover:!selected { color: #b9c6da; background: #101a2d; }
+
+/* 패널 (그룹박스) — 모서리 시안 라인 느낌 */
+QGroupBox {
+    background: #101829; border: 1px solid #1f2d4a; border-radius: 5px;
+    margin-top: 14px; padding: 10px 8px 8px 8px; font-weight: 600; }
+QGroupBox::title {
+    subcontrol-origin: margin; subcontrol-position: top left;
+    left: 10px; padding: 1px 8px; color: #36cdd6;
+    background: #101829; letter-spacing: 1px; }
+
+QLabel { background: transparent; }
+QSplitter::handle { background: #15203a; }
+
+/* 입력칸 — 모노스페이스 숫자 */
+QLineEdit, QDoubleSpinBox, QSpinBox, QComboBox, QPlainTextEdit {
+    background: #0c1322; color: #e3eaf6; border: 1px solid #243450;
+    border-radius: 4px; padding: 4px 6px;
+    selection-background-color: #1f6fd0; }
+QDoubleSpinBox, QSpinBox, QLineEdit {
+    font-family: "Consolas", "Courier New", monospace; }
+QLineEdit:focus, QDoubleSpinBox:focus, QSpinBox:focus, QComboBox:focus {
+    border: 1px solid #36cdd6; }
+QComboBox::drop-down { border: none; width: 18px; }
+QComboBox QAbstractItemView {
+    background: #0c1322; border: 1px solid #2a3a59;
+    selection-background-color: #1f6fd0; outline: none; }
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button,
+QSpinBox::up-button, QSpinBox::down-button {
+    background: #16223a; border: none; width: 16px; }
+QDoubleSpinBox::up-button:hover, QDoubleSpinBox::down-button:hover,
+QSpinBox::up-button:hover, QSpinBox::down-button:hover { background: #20406a; }
+
+QPlainTextEdit {
+    font-family: "Consolas", "Courier New", monospace; font-size: 12px;
+    background: #080d18; border: 1px solid #1d2a44; }
+
+/* 버튼 — 기본은 어두운 시안 테두리, 강조는 objectName */
+QPushButton {
+    background: #16223a; color: #cfe0ee; border: 1px solid #2a456e;
+    border-radius: 4px; padding: 7px 14px; font-weight: 600; }
+QPushButton:hover { background: #1d2f4f; border-color: #36cdd6; }
+QPushButton:pressed { background: #122036; }
+QPushButton:disabled { background: #11182a; color: #54607a;
+    border-color: #1c283f; }
+QPushButton#primary {
+    background: #1763c4; color: #ffffff; border: 1px solid #2a7be0; }
+QPushButton#primary:hover { background: #1f78e0; }
+QPushButton#go {
+    background: #14854a; color: #ffffff; border: 1px solid #1ca85e; }
+QPushButton#go:hover { background: #18a25a; }
+
+/* 표 */
+QTableWidget, QTableView {
+    background: #0c1322; alternate-background-color: #0f1828;
+    gridline-color: #1d2a44; border: 1px solid #1d2a44;
+    selection-background-color: #1c3a63; selection-color: #ffffff; }
+QHeaderView::section {
+    background: #16223a; color: #9fb0c8; padding: 6px;
+    border: none; border-right: 1px solid #1d2a44;
+    border-bottom: 1px solid #2a3a59; font-weight: 600; }
+QTableCornerButton::section { background: #16223a; border: none; }
+QCheckBox { background: transparent; }
+QCheckBox::indicator, QTableWidget::indicator {
+    width: 16px; height: 16px; border: 1px solid #2a456e;
+    border-radius: 3px; background: #0c1322; }
+QCheckBox::indicator:checked, QTableWidget::indicator:checked {
+    background: #1f6fd0; border-color: #2a7be0; }
+
+/* 진행바 */
+QProgressBar {
+    background: #0c1322; border: 1px solid #243450; border-radius: 4px;
+    text-align: center; color: #cdd7e6; height: 18px; }
+QProgressBar::chunk {
+    background: #36cdd6; border-radius: 3px; }
+
+/* 스크롤바 */
+QScrollBar:vertical { background: #0b0f1a; width: 11px; margin: 0; }
+QScrollBar::handle:vertical { background: #2a3a59; border-radius: 5px;
+    min-height: 24px; }
+QScrollBar::handle:vertical:hover { background: #36cdd6; }
+QScrollBar:horizontal { background: #0b0f1a; height: 11px; margin: 0; }
+QScrollBar::handle:horizontal { background: #2a3a59; border-radius: 5px;
+    min-width: 24px; }
+QScrollBar::add-line, QScrollBar::sub-line { height: 0; width: 0; }
+QScrollBar::add-page, QScrollBar::sub-page { background: transparent; }
+
+QStatusBar { background: #0d1424; color: #8896ad;
+    border-top: 1px solid #15203a; }
+QMessageBox { background: #101829; }
+"""
 
 DESIGN_VARS = ["a_m", "T_m", "T_m2", "W_t", "MagnetR"]
 
 OBJ_UNITS = {"T_avg": "mNm", "emf_rms": "V", "magnet_area": "mm²",
              "ripple_pct": "%", "efficiency": "0~1", "cogging_pp": "mNm",
-             "Pcu_per_Nm2": "W/Nm²"}
+             "Pcu_W": "W"}
 
 # 응답 키 → 한글 표시명 (Objective·Result 탭 공용)
 RESP_KO = {"T_avg": "평균토크", "emf_rms": "역기전력", "magnet_area": "자석면적",
            "ripple_pct": "토크리플", "B_tooth": "치자속밀도", "efficiency": "효율",
-           "cogging_pp": "코깅토크", "Pcu_per_Nm2": "동손(토크당)"}
+           "cogging_pp": "코깅토크", "Pcu_W": "동손"}
 # 방향 유형: (내부값, 한글표시) — 콤보 itemData에 내부값 저장
 TYPE_KO = [("larger", "최대화 ↑"), ("smaller", "최소화 ↓"), ("target", "목표치 ◎")]
 TYPE_EN2KO = {en: ko for en, ko in TYPE_KO}
@@ -202,13 +325,29 @@ class MainWindow(QMainWindow):
         self._obj_autofilling = False    # 프로그램적 표 갱신 중 플래그
 
         tabs = QTabWidget()
-        self.setCentralWidget(tabs)
         tabs.addTab(self._tab_model(), "① Model")
         tabs.addTab(self._tab_objective(), "② Objective")
         tabs.addTab(self._tab_solve(), "③ Solve")
         tabs.addTab(self._tab_optimize(), "④ Optimize")
         tabs.addTab(self._tab_result(), "⑤ Result")
         self.tabs = tabs
+
+        # 상단 브랜드 헤더 (mini motor-cad 스타일)
+        header = QWidget(); header.setObjectName("Header")
+        hl = QHBoxLayout(header); hl.setContentsMargins(16, 8, 16, 8)
+        title = QLabel("MOTOR<span style='color:#36cdd6'>OPT</span>")
+        title.setObjectName("HeaderTitle")
+        sub = QLabel("MAXWELL 2D · AI MOTOR DESIGN")
+        sub.setObjectName("HeaderSub")
+        hl.addWidget(title); hl.addSpacing(12); hl.addWidget(sub); hl.addStretch()
+        self.lbl_header_model = QLabel("모델 없음")
+        self.lbl_header_model.setObjectName("HeaderSub")
+        hl.addWidget(self.lbl_header_model)
+
+        central = QWidget(); v = QVBoxLayout(central)
+        v.setContentsMargins(0, 0, 0, 0); v.setSpacing(0)
+        v.addWidget(header); v.addWidget(tabs, 1)
+        self.setCentralWidget(central)
         self.statusBar().showMessage("aedt 파일을 열어 시작하세요")
 
     # ---------------------------------------------------------- ① Model
@@ -216,6 +355,7 @@ class MainWindow(QMainWindow):
         w = QWidget(); lay = QHBoxLayout(w)
         left = QVBoxLayout()
         btn = QPushButton("📂 .aedt 열기")
+        btn.setObjectName("primary")
         btn.clicked.connect(self.open_aedt)
         left.addWidget(btn)
         self.lbl_model = QLabel("—")
@@ -278,6 +418,8 @@ class MainWindow(QMainWindow):
             f"<b>{self.model['design_name']}</b> · 자석={self.style} · "
             f"파트 {len(self.model['parts'])} · "
             f"코일 {len(self.model['boundaries']['coils'])}")
+        self.lbl_header_model.setText(
+            f"▣ {self.model['design_name']}")          # 헤더에 현재 모델명
         v, raw = self.model["variables"], self.model["variables_raw"]
         keys = list(raw)
         self.tbl_vars.setRowCount(len(keys))
@@ -485,6 +627,7 @@ class MainWindow(QMainWindow):
         b1 = QPushButton("▶ 무부하 해석 (코깅·EMF용 단일 포지션)")
         b1.clicked.connect(lambda: self.run_solve(load=False))
         b2 = QPushButton("▶ 부하 해석 (입력 전류·MTPA)")
+        b2.setObjectName("primary")
         b2.clicked.connect(lambda: self.run_solve(load=True))
         left.addWidget(b1); left.addWidget(b2)
 
@@ -543,6 +686,7 @@ class MainWindow(QMainWindow):
         self.sp_stack.valueChanged.connect(self._apply_stack)
         self._update_iconv()
         b3 = QPushButton("▶ 부하 스윕 실행 (γ 캘리브레이션 포함 — 수 분 소요)")
+        b3.setObjectName("go")
         b3.clicked.connect(self.run_load_sweep)
         g.addWidget(b3, 5, 0, 1, 6)
         left.addWidget(grp)
@@ -737,10 +881,12 @@ class MainWindow(QMainWindow):
         g.addWidget(QLabel("설계 수 (권장 60+, 설계당 ~20초)"), 0, 0)
         g.addWidget(self.sp_ndoe, 1, 0)
         self.btn_doe = QPushButton("▶ DOE 생성 (전류는 Solve 탭 상전류 사용)")
+        self.btn_doe.setObjectName("go")
         self.btn_doe.clicked.connect(self.run_doe_build)
         g.addWidget(self.btn_doe, 2, 0)
         left.addWidget(grp)
         self.btn_active = QPushButton("▶ 액티브러닝 1라운드 (DE→FEM 검증→재학습)")
+        self.btn_active.setObjectName("primary")
         self.btn_active.clicked.connect(self.run_active_round)
         self.btn_sac = QPushButton("▶ SAC 정책으로 현재 설계 개선 (24스텝)")
         self.btn_sac.clicked.connect(self.run_sac_improve)
@@ -831,7 +977,7 @@ class MainWindow(QMainWindow):
             _spec = self._spec_from_table()
             want_eff = "efficiency" in _spec
             want_cog = "cogging_pp" in _spec
-            want_cmin = "Pcu_per_Nm2" in _spec
+            want_cmin = "Pcu_W" in _spec
         except ValueError:
             want_eff = want_cog = want_cmin = False
         rpm = float(self.sp_rpm.value())
@@ -958,13 +1104,14 @@ class MainWindow(QMainWindow):
         if cb.currentData() == "target":                 # 목표치 → 타겟값 활성
             it.setFlags(it.flags() | Qt.ItemFlag.ItemIsEditable
                         | Qt.ItemFlag.ItemIsEnabled)
-            it.setBackground(QColor("white"))
+            it.setBackground(QColor("#12233f"))          # 활성 = 푸른 입력색
+            it.setForeground(QColor("#e3eaf6"))
             it.setToolTip("목표로 맞출 값")
         else:                                            # 최대화/최소화 → 비활성
             it.setText("")
             it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable
                         & ~Qt.ItemFlag.ItemIsEnabled)
-            it.setBackground(QColor("#e8e8e8"))
+            it.setBackground(QColor("#0a0f18"))          # 비활성 = 어둡게
             it.setToolTip("최대화·최소화에서는 사용 안 함")
 
     def _on_obj_item_changed(self, item):
@@ -1060,7 +1207,7 @@ class MainWindow(QMainWindow):
             self._set_obj_row("emf_rms", ("target", r0[0], E0, r0[1]))
         if (r0 := rng("magnet_area")):
             self._set_obj_row("magnet_area", ("smaller", r0[0], r0[1]))
-        for k in ("cogging_pp", "Pcu_per_Nm2"):
+        for k in ("cogging_pp", "Pcu_W"):
             if (r0 := rng(k)):
                 self._set_obj_row(k, ("smaller", r0[0], r0[1]))
         return True
@@ -1080,7 +1227,7 @@ class MainWindow(QMainWindow):
         # 효율이 목표에 있으면 부하 스윕까지 평가 — Solve 탭 운전조건 사용
         want_eff = "efficiency" in spec
         want_cog = "cogging_pp" in spec
-        want_cmin = "Pcu_per_Nm2" in spec
+        want_cmin = "Pcu_W" in spec
         rpm = float(self.sp_rpm.value())
         d_cu = float(self.sp_dcu.value())
         strands = int(self.sp_strands.value())
@@ -1254,9 +1401,10 @@ class MainWindow(QMainWindow):
         left.addWidget(self.tbl_res, 1)
         self.lbl_res_warn = QLabel()               # 자동 진단 경고
         self.lbl_res_warn.setWordWrap(True)
-        self.lbl_res_warn.setStyleSheet("color:#b03000;")
+        self.lbl_res_warn.setStyleSheet("color:#f0b030;")
         left.addWidget(self.lbl_res_warn)
         btn = QPushButton("💾 최적 설계 .aedt 내보내기")
+        btn.setObjectName("primary")
         btn.clicked.connect(self.export_best)
         left.addWidget(btn)
         lw = QWidget(); lw.setLayout(left)
@@ -1331,6 +1479,8 @@ class MainWindow(QMainWindow):
         self.lbl_res_warn.setText("\n".join(warns) if warns
                                   else "✓ 자동 점검 통과 — 명백한 이상 없음 "
                                        "(절대값 최종확인은 Maxwell 권장)")
+        self.lbl_res_warn.setStyleSheet(               # 경고=호박 / 통과=초록
+            "color:#f0b030;" if warns else "color:#3fcf7a;")
         # 오버레이
         from motoropt.doe import vary
         from motoropt.geometry import build_motor
@@ -1415,6 +1565,7 @@ class MainWindow(QMainWindow):
 
 def main():
     app = QApplication(sys.argv)
+    app.setStyleSheet(DARK_QSS)               # 다크 엔지니어링 테마
     # PyQt6는 미처리 예외 시 qFatal(abort) — 다이얼로그로 대체해 앱 유지
     def hook(tp, val, tb):
         traceback.print_exception(tp, val, tb)

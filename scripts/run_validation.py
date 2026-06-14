@@ -43,7 +43,7 @@ def load_pt(model, style, steel, mag, *, I_ph, rpm, d_cu, strands, tcu):
     rph = phase_resistance(v, d_cu_mm=d_cu, strands=strands,
                            T_cu_C=tcu)["R_ph"]
     r = compute_responses(sw, model, R_ph_ohm=rph)
-    return r["T_avg"], r["efficiency"]
+    return r["T_avg"], r["efficiency"], r["T_ripple_pct"]
 
 
 def run():
@@ -55,12 +55,15 @@ def run():
         e = emf_rms(m, style, steel, mag, 1000.0)
         checks.append(("400W 무부하 EMF@1000rpm", e, 6.16, 0.02, "rel",
                        "Maxwell 6.166 V (검증 -0.1%)"))
-        T, eff = load_pt(m, style, steel, mag, I_ph=4.9, rpm=4500,
-                         d_cu=0.3, strands=11, tcu=80)
+        T, eff, rip = load_pt(m, style, steel, mag, I_ph=4.9, rpm=4500,
+                              d_cu=0.3, strands=11, tcu=80)
         checks.append(("400W 부하토크(가상일)@4.9A", T, 0.86, 0.05, "rel",
                        "PDF 0.85 N·m (검증 +1~2%)"))
         checks.append(("400W 효율@정격", eff, 0.947, 0.02, "abs",
                        "PDF 93.1% (자석와류·기계손 제외분)"))
+        checks.append(("400W 토크리플", rip, 4.65, 0.5, "abs",
+                       "보고서 2.97% — Arkkio pp가 밴드노이즈로 +1.7%p 과대 "
+                       "(리플 절대값 ±2%p 한계)"))
     else:
         print(f"⏭  400W.aedt 없음 ({p}) — 건너뜀")
 
@@ -73,12 +76,14 @@ def run():
         m["variables_raw"]["Zc"] = "14"
         # KRO80 코일선경 0.25mm (사양표·사용자 재확인). 0.25mm → 동손 576W·
         # 효율 66.7% = 보고서 67.8% -1.1%p 일치. MLT 동손모델 정상(동손 +8%).
-        T, eff = load_pt(m, style, steel, mag, I_ph=46.59 / math.sqrt(3),
-                         rpm=1478, d_cu=0.25, strands=11, tcu=80)
+        T, eff, rip = load_pt(m, style, steel, mag, I_ph=46.59 / math.sqrt(3),
+                              rpm=1478, d_cu=0.25, strands=11, tcu=80)
         checks.append(("KRO80 부하토크(가상일)@26.9A", T, 7.66, 0.05, "rel",
                        "Maxwell 7.13 N·m (극한포화 +7.5%)"))
         checks.append(("KRO80 효율@순시(0.25mm)", eff, 0.667, 0.02, "abs",
                        "보고서 67.8% (검증 -1.1%p)"))
+        checks.append(("KRO80 토크리플", rip, 2.88, 0.5, "abs",
+                       "보고서 3.0% (검증 -0.1%p, 잘 맞음)"))
     else:
         print(f"⏭  KRO80 aedt 없음 ({p}) — 건너뜀")
 
