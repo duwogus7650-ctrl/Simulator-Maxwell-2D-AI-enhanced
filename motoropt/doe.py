@@ -192,7 +192,8 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
         step = (60.0 / pp) / n_load
         angs_l = np.arange(-1, n_load + 1) * step      # 가드 포함 n+2점
         Wc, lam3, i3, Ta = [], [], [], []
-        Bt = 0.0
+        Bt = Bt_tooth = Bt_yoke = 0.0
+        r_yi = v["D_so"] / 2.0 - v["T_Yoke"]      # 스테이터 요크 내반경[m]
         for a in angs_l:
             s, res, iph = solve(a, True)
             Wc.append(coenergy(s, res, L))
@@ -203,6 +204,17 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
                                     sbm.r_o - 0.005, L))
             st = res.Bmag[s.is_steel]
             Bt = max(Bt, float(np.percentile(st, 95)))
+            # 치/요크 분리: 스테이터 강판을 반경으로 (요크=바깥 링, 치=안쪽)
+            rad = np.hypot(s.centroid[:, 0], s.centroid[:, 1])
+            stator = (s.kind == "stator")
+            tooth = stator & (rad < r_yi)
+            yoke = stator & (rad >= r_yi)
+            if tooth.any():
+                Bt_tooth = max(Bt_tooth,
+                               float(np.percentile(res.Bmag[tooth], 95)))
+            if yoke.any():
+                Bt_yoke = max(Bt_yoke,
+                              float(np.percentile(res.Bmag[yoke], 95)))
         th = np.radians(angs_l)
         Wc = np.asarray(Wc)
         lam3 = np.asarray(lam3)
@@ -219,7 +231,9 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
             (Ta_in.max() - Ta_in.min()) / np.mean(Ta_in) * 100)
         out["ripple_pct_vw"] = float(
             (Tvw.max() - Tvw.min()) / np.mean(Tvw) * 100)   # 참고용
-        out["B_tooth"] = Bt
+        out["B_tooth"] = Bt              # 전체 강판 95% (기존 호환)
+        out["B_tooth_st"] = Bt_tooth     # 스테이터 치 95% (포화 ≤1.8T)
+        out["B_yoke"] = Bt_yoke          # 스테이터 요크 95% (포화 ≤1.6T)
         out["magnet_area"] = float(sum(p.area for p, _, _ in geo.magnets))
 
         # ---- (옵션) 코깅: 무부하 1주기 가상일토크 → FFT 저차 pk-pk -------

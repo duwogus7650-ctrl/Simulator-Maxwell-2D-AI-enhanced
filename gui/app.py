@@ -191,12 +191,13 @@ DESIGN_VARS = ["a_m", "T_m", "T_m2", "W_t", "MagnetR"]
 
 OBJ_UNITS = {"T_avg": "mNm", "emf_rms": "V", "magnet_area": "mm²",
              "ripple_pct": "%", "efficiency": "0~1", "cogging_pp": "mNm",
-             "Pcu_W": "W"}
+             "Pcu_W": "W", "B_tooth_st": "T", "B_yoke": "T"}
 
 # 응답 키 → 한글 표시명 (Objective·Result 탭 공용)
 RESP_KO = {"T_avg": "평균토크", "emf_rms": "역기전력", "magnet_area": "자석면적",
            "ripple_pct": "토크리플", "B_tooth": "치자속밀도", "efficiency": "효율",
-           "cogging_pp": "코깅토크", "Pcu_W": "동손"}
+           "cogging_pp": "코깅토크", "Pcu_W": "동손",
+           "B_tooth_st": "치 자속", "B_yoke": "요크 자속"}
 # 방향 유형: (내부값, 한글표시) — 콤보 itemData에 내부값 저장
 TYPE_KO = [("larger", "최대화 ↑"), ("smaller", "최소화 ↓"), ("target", "목표치 ◎")]
 TYPE_EN2KO = {en: ko for en, ko in TYPE_KO}
@@ -1342,13 +1343,8 @@ class MainWindow(QMainWindow):
                 lo, hi = lo * 0.98 - 1e-6, hi * 1.02 + 1e-6
             return lo, hi
 
-        E0 = row["emf_rms"]
         if (r0 := rng("T_avg")):
             self._set_obj_row("T_avg", ("larger", r0[0], r0[1]))
-        if (r0 := rng("emf_rms")):                 # 역기전력은 기준 유지(목표치)
-            self._set_obj_row("emf_rms", ("target", r0[0], E0, r0[1]))
-        if (r0 := rng("magnet_area")):
-            self._set_obj_row("magnet_area", ("smaller", r0[0], r0[1]))
         if (r0 := rng("cogging_pp")):
             self._set_obj_row("cogging_pp", ("smaller", r0[0], r0[1]))
         return True
