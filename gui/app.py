@@ -672,6 +672,9 @@ class MainWindow(QMainWindow):
                 log(f"R_ph(MLT 계산) = {R_in*1e3:.1f} mΩ "
                     f"(MLT {w['MLT_mm']:.1f} mm, 직렬 {w['n_series']:.0f}턴, "
                     f"도체 {w['turn_csa_mm2']:.3f} mm², {tcu:.0f}°C)")
+                log("  ⚠ 동손은 MLT 추정값 — 엔드와인딩이 긴 모델(예: KRO80)에선 "
+                    "~25% 과소될 수 있음. 정확한 동손·효율은 상저항 [mΩ]에 실측 "
+                    "R_ph를 직접 입력하세요(0=MLT 자동).")
             log("γ 캘리브레이션 (4점 프로브 × 6스텝)...")
             cal = calibrate_gamma(m2, style, rpm=rpm, I_rms=irms,
                                   n_steps=6, init_pos_deg=ini)
