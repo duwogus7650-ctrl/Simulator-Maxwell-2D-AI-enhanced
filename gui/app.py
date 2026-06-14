@@ -983,19 +983,30 @@ class MainWindow(QMainWindow):
         if not oks:
             return False
         row = row or oks[0]                        # 기준 없으면 첫 유효 행
-        T0, E0, A0 = row["T_avg"], row["emf_rms"], row["magnet_area"]
-        self._set_obj_row("T_avg", ("larger", T0, T0 * 1.03))
-        self._set_obj_row("emf_rms", ("target", E0 * 0.95, E0, E0 * 1.05))
-        self._set_obj_row("magnet_area", ("smaller", A0 * 0.74, A0))
-        # 코깅·동손(작을수록 좋음): DOE 실제 범위로 L=최솟값,U=최댓값 설정
-        # → 만족도가 0~1로 분포해 DE가 경사를 따라간다(상한 잘못 두면 D=0됨).
+
+        # 모든 목표 상하한을 이 모델의 DOE 실제 범위(최소~최대)로 설정한다.
+        # 이래야 만족도가 0~1로 고르게 분포해 DE가 경사를 따라가고, 어떤
+        # aedt를 넣어도 D가 0으로 붕괴하지 않는다(기준값 기반은 기준이 이미
+        # 최적이면 '기준 넘어라'가 불가능→D=0 됨 — KRO80 사례).
+        def rng(key):
+            vals = [r[key] for r in oks if key in r and r[key] is not None]
+            if len(vals) < 3:
+                return None
+            lo, hi = float(min(vals)), float(max(vals))
+            if hi - lo < abs(lo) * 1e-3 + 1e-9:    # 거의 동일하면 ±2% 여유
+                lo, hi = lo * 0.98 - 1e-6, hi * 1.02 + 1e-6
+            return lo, hi
+
+        E0 = row["emf_rms"]
+        if (r0 := rng("T_avg")):
+            self._set_obj_row("T_avg", ("larger", r0[0], r0[1]))
+        if (r0 := rng("emf_rms")):                 # 역기전력은 기준 유지(목표치)
+            self._set_obj_row("emf_rms", ("target", r0[0], E0, r0[1]))
+        if (r0 := rng("magnet_area")):
+            self._set_obj_row("magnet_area", ("smaller", r0[0], r0[1]))
         for k in ("cogging_pp", "Pcu_per_Nm2"):
-            vals = [r[k] for r in oks if k in r and r[k] is not None]
-            if len(vals) >= 3:
-                lo, hi = min(vals), max(vals)
-                if hi - lo < 1e-9:
-                    hi = lo * 1.05 + 1e-6
-                self._set_obj_row(k, ("smaller", lo, hi))
+            if (r0 := rng(k)):
+                self._set_obj_row(k, ("smaller", r0[0], r0[1]))
         return True
 
     def run_active_round(self):
