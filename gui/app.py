@@ -817,14 +817,13 @@ class MainWindow(QMainWindow):
             designs = [d for d in designs
                        if tuple(round(val, 6) for val in d.values())
                        not in done]
-            per = (66 if want_eff else 20) + (16 if want_cog else 0)
+            per = (66 if want_eff else 20) + (24 if want_cog else 0)
             if want_eff:
                 log("ℹ 효율 포함 평가 — 설계당 ~66초(부하스윕). DE 탐색이 "
                     "효율도 직접 최적화하게 됩니다.")
             if want_cog:
-                log("ℹ 코깅 포함 평가 — 설계당 +~16초(무부하 1주기 16점). "
-                    "⚠ 코깅은 노이즈 큰 미소토크라 서로게이트 학습성은 낮을 수 "
-                    "있음 — 후보 FEM검증으로 확인 권장.")
+                log("ℹ 코깅 포함 평가 — 설계당 +~24초(무부하 1주기 가상일·FFT "
+                    "저차 추출, 밴드노이즈 제거). a_m에 강하게 의존해 학습 가능.")
             log(f"평가할 설계 {len(designs)}개 (기존 {len(done)}개 스킵) — "
                 f"예상 {len(designs)*per//60}분")
             t0 = time.time()

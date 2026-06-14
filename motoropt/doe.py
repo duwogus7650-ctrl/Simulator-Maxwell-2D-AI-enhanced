@@ -119,7 +119,7 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
                     with_efficiency: bool = False,
                     with_cogging: bool = False,
                     with_current_min: bool = False,
-                    n_cog: int = 16,
+                    n_cog: int = 24,
                     rpm: float | None = None,
                     d_cu_mm: float = 0.25,
                     strands: int = 11,
@@ -222,19 +222,22 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
         out["B_tooth"] = Bt
         out["magnet_area"] = float(sum(p.area for p, _, _ in geo.magnets))
 
-        # ---- (옵션) 코깅: 무부하 코깅 1주기 pk-pk -----------------------
-        # 코깅 기본주기(기계각) = 360/LCM(슬롯,극). 슬라이딩밴드가 위치 간
-        # 메시 위상을 맞춰 한 설계 내 노이즈는 작지만, 설계 간 재메싱 노이즈는
-        # 남아 서로게이트 학습성은 검증 필요(리플처럼 노이즈 한계 가능).
+        # ---- (옵션) 코깅: 무부하 1주기 가상일토크 → FFT 저차 pk-pk -------
+        # 코깅 기본주기(기계각)=360/LCM(슬롯,극). 코깅=−dW_co/dθ(가상일)을
+        # 무부하 1주기에서 구한 뒤, 저차(1~3)만 남겨 슬라이딩밴드 이산화
+        # 노이즈(고차 alias)를 제거한다. raw Arkkio pk-pk는 밴드노이즈로
+        # 3~6배 과대(검증: 400W raw 16~37 vs 코에너지FFT 4.1 ≈ Maxwell 5.95).
         if with_cogging:
             npole = int(round(v["N_pole"]))
             cog_period = 360.0 / int(np.lcm(n_slot, npole))
-            Tc = []
-            for a in np.linspace(0, cog_period, n_cog, endpoint=False):
+            angs = np.linspace(0, cog_period, n_cog, endpoint=False)
+            Wc = []
+            for a in angs:
                 sc, rc, _ = solve(a, False)
-                Tc.append(torque_arkkio(sc, rc, sbm.r_i + 0.005,
-                                        sbm.r_o - 0.005, L))
-            Tc = np.asarray(Tc)
+                Wc.append(coenergy(sc, rc, L))
+            T = -np.gradient(np.asarray(Wc), np.radians(angs))   # 코깅 [N·m]
+            F = np.fft.rfft(T); F[4:] = 0.0       # 저차(코깅 1~3차)만 유지
+            Tc = np.fft.irfft(F, n_cog)
             out["cogging_pp"] = float((Tc.max() - Tc.min()) * 1e3)   # mNm
 
         # ---- (옵션) 전류 최소화 = 동손 최소화 --------------------------
