@@ -71,18 +71,14 @@ def run():
         steel, mag = detect_material_names(m)
         m["variables"]["Zc"] = 14.0            # 설계 턴수(aedt는 15)
         m["variables_raw"]["Zc"] = "14"
-        # KRO80 코일선경 0.3mm(MotorCAD 실제). ⚠ MLT 동손추정이 KRO80
-        # 엔드와인딩을 ~25% 과소(MLT 84 vs 보고서함의 107mm) → 동손 400 vs
-        # 533W → 효율 74% vs 보고서 67.8%(+6%p). 400W/1250W는 MLT가 맞지만
-        # KRO80은 안 맞음(geometry 특이). 정확한 효율은 GUI 상저항에 실측 R_ph
-        # (≈245mΩ) 입력. 여기선 motoropt 실측(MLT추정)을 드리프트 기준으로 둠.
+        # KRO80 코일선경 0.25mm (사양표·사용자 재확인). 0.25mm → 동손 576W·
+        # 효율 66.7% = 보고서 67.8% -1.1%p 일치. MLT 동손모델 정상(동손 +8%).
         T, eff = load_pt(m, style, steel, mag, I_ph=46.59 / math.sqrt(3),
-                         rpm=1478, d_cu=0.3, strands=11, tcu=80)
+                         rpm=1478, d_cu=0.25, strands=11, tcu=80)
         checks.append(("KRO80 부하토크(가상일)@26.9A", T, 7.66, 0.05, "rel",
                        "Maxwell 7.13 N·m (극한포화 +7.5%)"))
-        checks.append(("KRO80 효율@순시(0.3mm,MLT추정)", eff, 0.741, 0.02, "abs",
-                       "보고서 67.8% — MLT가 KRO80 엔드와인딩 과소(동손-25%)·"
-                       "실측 R_ph 입력 시 일치"))
+        checks.append(("KRO80 효율@순시(0.25mm)", eff, 0.667, 0.02, "abs",
+                       "보고서 67.8% (검증 -1.1%p)"))
     else:
         print(f"⏭  KRO80 aedt 없음 ({p}) — 건너뜀")
 
