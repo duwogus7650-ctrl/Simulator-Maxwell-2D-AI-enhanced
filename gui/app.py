@@ -85,6 +85,60 @@ def resp_label(key: str) -> str:
     return f"{RESP_KO.get(key, key)} [{u}]" if u else RESP_KO.get(key, key)
 
 
+def diagnose_result(fem: dict, spec: dict, fem_D: float,
+                    surro_D: float | None = None) -> list:
+    """결과 자동 진단 — 비전문가도 알 수 있게 경고 리스트 반환.
+
+    (1) D=0 원인: 어느 목표가 만족도 0인지·왜(값 vs 한계).
+    (2) AI 과대예측: 서로게이트 D ≫ 실제 FEM D.
+    (3) 물리 타당성: 깊은 포화·코깅 과다·Arkkio↔가상일 괴리·비현실 효율.
+    솔버가 스스로 '의심스러운 결과'를 표면화해 조용한 오류를 막는다."""
+    from motoropt.objective import _D_FUNCS
+    out = []
+    zeros = []
+    for k, s in spec.items():
+        if k not in fem or fem[k] is None:
+            continue
+        d = float(_D_FUNCS[s[0]](np.array([fem[k]], float), *s[1:])[0])
+        if d < 0.02:
+            if s[0] == "larger":
+                why = f"{fem[k]:.4g} < 하한 {s[1]:.4g}"
+            elif s[0] == "smaller":
+                why = f"{fem[k]:.4g} > 상한 {s[-1]:.4g}"
+            else:
+                why = f"{fem[k]:.4g}, 목표 {s[2]:.4g}"
+            zeros.append(f"{RESP_KO.get(k, k)}=0점({why})")
+    if fem_D < 1e-6 and zeros:
+        out.append("⚠ 종합 D=0 원인: " + " · ".join(zeros) +
+                   " → 그 목표의 한계(L/U)를 현실값으로 조정하거나 액티브러닝을 "
+                   "더 돌리세요. (만족도는 곱이라 한 항목만 0이어도 전체 0)")
+    elif zeros:
+        out.append("ℹ 일부 목표 0점: " + " · ".join(zeros) + " (종합엔 미반영)")
+    if surro_D is not None and surro_D - fem_D > 0.25:
+        out.append(f"⚠ AI(서로게이트) 과대예측: 예측 D={surro_D:.3f} → 실제 "
+                   f"D={fem_D:.3f}. 학습 덜 된 영역을 골랐을 수 있음 — "
+                   "액티브러닝 2~3회 더 돌리면 보정됩니다.")
+    flags = []
+    Bt = fem.get("B_tooth")
+    if Bt and Bt > 2.5:
+        flags.append(f"치 자속 {Bt:.2f}T(깊은 포화)")
+    if fem.get("T_avg") and fem.get("cogging_pp") is not None and fem["T_avg"]:
+        rc = fem["cogging_pp"] / fem["T_avg"] * 100
+        if rc > 3:
+            flags.append(f"코깅이 평균토크의 {rc:.1f}%(큼)")
+    if fem.get("T_avg") and fem.get("T_arkkio"):
+        dv = abs(fem["T_arkkio"] - fem["T_avg"]) / fem["T_avg"] * 100
+        if dv > 8:
+            flags.append(f"Arkkio↔가상일 토크 {dv:.0f}% 괴리(메시 점검)")
+    eff = fem.get("efficiency")
+    if eff is not None and (eff > 0.99 or eff < 0.3):
+        flags.append(f"효율 {eff*100:.0f}%(운전점 확인)")
+    if flags:
+        out.append("⚠ 물리 타당성 점검: " + " / ".join(flags) +
+                   " — 절대값은 Maxwell 교차검증 권장.")
+    return out
+
+
 def _obj_key(text: str) -> str:
     """테이블 표시명 'T_avg [mNm]' → 응답 키 'T_avg'."""
     return text.split(" [")[0].strip()
@@ -1106,6 +1160,8 @@ class MainWindow(QMainWindow):
                 msg += (f" η={fem['efficiency']*100:.1f}% "
                         f"(P_fe {fem['P_fe']:.1f} P_cu {fem['P_cu']:.1f}W)")
             log(msg)
+            for wmsg in diagnose_result(fem, spec, D, surro_D=-r.fun):
+                log(wmsg)                          # 자동 진단·경고
             log(f"✅ 액티브러닝 1라운드 완료 (소요 {(time.time()-t0)/60:.1f}분)")
             return (D, xd, fem)
 
@@ -1194,6 +1250,10 @@ class MainWindow(QMainWindow):
         self.tbl_res.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch)
         left.addWidget(self.tbl_res, 1)
+        self.lbl_res_warn = QLabel()               # 자동 진단 경고
+        self.lbl_res_warn.setWordWrap(True)
+        self.lbl_res_warn.setStyleSheet("color:#b03000;")
+        left.addWidget(self.lbl_res_warn)
         btn = QPushButton("💾 최적 설계 .aedt 내보내기")
         btn.clicked.connect(self.export_best)
         left.addWidget(btn)
@@ -1265,6 +1325,10 @@ class MainWindow(QMainWindow):
         for i, r in enumerate(rows):
             for j, t in enumerate(r):
                 self.tbl_res.setItem(i, j, QTableWidgetItem(t))
+        warns = diagnose_result(fem, spec, D)        # 자동 진단 경고
+        self.lbl_res_warn.setText("\n".join(warns) if warns
+                                  else "✓ 자동 점검 통과 — 명백한 이상 없음 "
+                                       "(절대값 최종확인은 Maxwell 권장)")
         # 오버레이
         from motoropt.doe import vary
         from motoropt.geometry import build_motor
