@@ -44,8 +44,8 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QFileDialog, QGridLayout,
     QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMainWindow, QMessageBox,
-    QPlainTextEdit, QPushButton, QSplitter, QTableWidget, QTableWidgetItem,
-    QTabWidget, QVBoxLayout, QWidget)
+    QPlainTextEdit, QProgressBar, QPushButton, QSplitter, QTableWidget,
+    QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
 import matplotlib
 matplotlib.use("QtAgg")
@@ -68,7 +68,21 @@ DESIGN_VARS = ["a_m", "T_m", "T_m2", "W_t", "MagnetR"]
 
 OBJ_UNITS = {"T_avg": "mNm", "emf_rms": "V", "magnet_area": "mm²",
              "ripple_pct": "%", "efficiency": "0~1", "cogging_pp": "mNm",
-             "Pcu_per_Nm2": "W/Nm²(동손↓)"}
+             "Pcu_per_Nm2": "W/Nm²"}
+
+# 응답 키 → 한글 표시명 (Objective·Result 탭 공용)
+RESP_KO = {"T_avg": "평균토크", "emf_rms": "역기전력", "magnet_area": "자석면적",
+           "ripple_pct": "토크리플", "B_tooth": "치자속밀도", "efficiency": "효율",
+           "cogging_pp": "코깅토크", "Pcu_per_Nm2": "동손(토크당)"}
+# 방향 유형: (내부값, 한글표시) — 콤보 itemData에 내부값 저장
+TYPE_KO = [("larger", "최대화 ↑"), ("smaller", "최소화 ↓"), ("target", "목표치 ◎")]
+TYPE_EN2KO = {en: ko for en, ko in TYPE_KO}
+
+
+def resp_label(key: str) -> str:
+    """응답 키 → '평균토크 [mNm]' 표시명."""
+    u = OBJ_UNITS.get(key, "")
+    return f"{RESP_KO.get(key, key)} [{u}]" if u else RESP_KO.get(key, key)
 
 
 def _obj_key(text: str) -> str:
@@ -102,6 +116,7 @@ class Worker(QThread):
     log = pyqtSignal(str)
     done = pyqtSignal(object)
     failed = pyqtSignal(str)
+    geom = pyqtSignal(object)        # 실시간 형상 (설계변수 dict)
 
     def __init__(self, fn, *args, **kw):
         super().__init__()
@@ -128,6 +143,7 @@ class MainWindow(QMainWindow):
         self.last_responses = None # 부하 스윕 응답 dict
         self.candidates = []       # 최적화 후보 [(D, x, fem)]
         self._workers = []
+        self._cur_geom_emit = lambda *a, **k: None   # 잡→GUI 형상/진행 통로
 
         tabs = QTabWidget()
         self.setCentralWidget(tabs)
@@ -332,14 +348,15 @@ class MainWindow(QMainWindow):
     def _tab_objective(self):
         w = QWidget(); lay = QVBoxLayout(w)
         lay.addWidget(QLabel(
-            "<b>목표 특성 (Derringer-Suich 만족도)</b> — "
-            "유형: larger(↑)/smaller(↓)/target(목표값)"))
+            "<b>목표 특성</b> — 최적화에서 동시에 만족시킬 성능 목표를 고르세요.<br>"
+            "<b>방향</b>: 최대화↑(클수록 좋음)·최소화↓(작을수록 좋음)·목표치◎"
+            "(특정값에 맞춤). 방향에 따라 입력칸이 자동 활성화됩니다."))
         from motoropt.objective import SPEC, SPEC_EXTRA
         rows = [(k, s, True) for k, s in SPEC.items()] + \
                [(k, s, False) for k, s in SPEC_EXTRA.items()]
         self.tbl_obj = QTableWidget(len(rows), 6)
         self.tbl_obj.setHorizontalHeaderLabels(
-            ["사용", "응답", "유형", "L (하한)", "T (목표)", "U (상한)"])
+            ["사용", "목표 특성", "방향", "하한치 (L)", "타겟값 (T)", "상한치 (U)"])
         self.tbl_obj.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch)
         for i, (k, spec, on) in enumerate(rows):
@@ -349,13 +366,15 @@ class MainWindow(QMainWindow):
             chk.setCheckState(Qt.CheckState.Checked if on
                               else Qt.CheckState.Unchecked)
             self.tbl_obj.setItem(i, 0, chk)
-            name = QTableWidgetItem(
-                f"{k} [{OBJ_UNITS[k]}]" if k in OBJ_UNITS else k)
+            name = QTableWidgetItem(resp_label(k))
             name.setFlags(name.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            name.setData(Qt.ItemDataRole.UserRole, k)      # 내부 응답 키 보관
             self.tbl_obj.setItem(i, 1, name)
-            cb = QComboBox(); cb.addItems(["larger", "smaller", "target"])
-            cb.setCurrentText(spec[0])
-            cb.currentTextChanged.connect(
+            cb = QComboBox()
+            for en, ko in TYPE_KO:
+                cb.addItem(ko, en)                          # 표시=한글, data=내부값
+            cb.setCurrentIndex([e for e, _ in TYPE_KO].index(spec[0]))
+            cb.currentIndexChanged.connect(
                 lambda _t, r=i: self._update_obj_row_state(r))
             self.tbl_obj.setCellWidget(i, 2, cb)
             if spec[0] == "target":
@@ -369,10 +388,12 @@ class MainWindow(QMainWindow):
             self._update_obj_row_state(i)
         lay.addWidget(self.tbl_obj)
         lay.addWidget(QLabel(
-            "종합 만족도 D = (∏ dᵢ)^(1/n) — 모든 목표를 동시에 만족할수록 "
-            "1에 가까움.<br>efficiency·ripple_pct는 Solve 탭 ▶부하 스윕에서 "
-            "FEM으로 평가됩니다 (efficiency는 서로게이트 응답에 없어 "
-            "Optimize의 DE 탐색에는 미참여)."))
+            "종합 만족도 D = (∏ dᵢ)^(1/n) — 모든 목표를 동시에 만족할수록 1에 "
+            "가까움.<br>• <b>최대화</b>: 하한치=미달 기준(0점), 상한치=충분 기준"
+            "(만점) • <b>최소화</b>: 하한치=충분히 작음(만점), 상한치=초과 기준"
+            "(0점) • <b>목표치</b>: 하한·타겟·상한 모두 사용.<br>"
+            "토크리플·치자속밀도는 노이즈가 커 학습이 안 되니 목표로 쓰지 말고 "
+            "후보 FEM 검증으로만 확인하세요."))
         lay.addStretch(1)
         return w
 
@@ -382,8 +403,8 @@ class MainWindow(QMainWindow):
         for i in range(self.tbl_obj.rowCount()):
             if self.tbl_obj.item(i, 0).checkState() != Qt.CheckState.Checked:
                 continue
-            k = _obj_key(self.tbl_obj.item(i, 1).text())
-            typ = self.tbl_obj.cellWidget(i, 2).currentText()
+            k = self.tbl_obj.item(i, 1).data(Qt.ItemDataRole.UserRole)
+            typ = self.tbl_obj.cellWidget(i, 2).currentData()   # 내부값(en)
             try:
                 L = float(self.tbl_obj.item(i, 3).text())
                 U = float(self.tbl_obj.item(i, 5).text())
@@ -653,15 +674,18 @@ class MainWindow(QMainWindow):
         self.sp_ndoe.setDecimals(0); self.sp_ndoe.setValue(60)
         g.addWidget(QLabel("설계 수 (권장 60+, 설계당 ~20초)"), 0, 0)
         g.addWidget(self.sp_ndoe, 1, 0)
-        b0 = QPushButton("▶ DOE 생성 (전류는 Solve 탭 상전류 사용)")
-        b0.clicked.connect(self.run_doe_build)
-        g.addWidget(b0, 2, 0)
+        self.btn_doe = QPushButton("▶ DOE 생성 (전류는 Solve 탭 상전류 사용)")
+        self.btn_doe.clicked.connect(self.run_doe_build)
+        g.addWidget(self.btn_doe, 2, 0)
         left.addWidget(grp)
-        b1 = QPushButton("▶ 액티브러닝 1라운드 (DE→FEM 검증→재학습)")
-        b1.clicked.connect(self.run_active_round)
-        b2 = QPushButton("▶ SAC 정책으로 현재 설계 개선 (24스텝)")
-        b2.clicked.connect(self.run_sac_improve)
-        left.addWidget(b1); left.addWidget(b2)
+        self.btn_active = QPushButton("▶ 액티브러닝 1라운드 (DE→FEM 검증→재학습)")
+        self.btn_active.clicked.connect(self.run_active_round)
+        self.btn_sac = QPushButton("▶ SAC 정책으로 현재 설계 개선 (24스텝)")
+        self.btn_sac.clicked.connect(self.run_sac_improve)
+        left.addWidget(self.btn_active); left.addWidget(self.btn_sac)
+        self.pb_opt = QProgressBar(); self.pb_opt.setRange(0, 100)
+        self.pb_opt.setValue(0); self.pb_opt.setFormat("%p% — 대기")
+        left.addWidget(self.pb_opt)
         self.log_opt = QPlainTextEdit(); self.log_opt.setReadOnly(True)
         left.addWidget(self.log_opt, 1)
         lw = QWidget(); lw.setLayout(left)
@@ -674,11 +698,60 @@ class MainWindow(QMainWindow):
         self.tbl_cand.horizontalHeader().setSectionResizeMode(
             QHeaderView.ResizeMode.Stretch)
         right.addWidget(self.tbl_cand, 1)
+        right.addWidget(QLabel("<b>탐색 중 형상 (실시간)</b> — 회색=기준 / 적색=현재 최적"))
+        self.fig_opt = Figure(figsize=(4.2, 4.2), tight_layout=True)
+        self.cv_opt = FigureCanvasQTAgg(self.fig_opt)
+        right.addWidget(self.cv_opt, 2)
         rw = QWidget(); rw.setLayout(right)
         sp = QSplitter(); sp.addWidget(lw); sp.addWidget(rw)
-        sp.setSizes([480, 770])
+        sp.setSizes([460, 790])
         lay.addWidget(sp)
         return w
+
+    def _on_opt_update(self, payload):
+        """탐색 진행 표시 — payload dict {x, info, frac}.
+        frac → 진행바, x(설계변수) → 실시간 형상(회색=기준, 적색=현재)."""
+        frac = payload.get("frac")
+        if frac is not None:
+            self.pb_opt.setValue(int(max(0, min(1, frac)) * 100))
+            self.pb_opt.setFormat((payload.get("info") or "") + "  %p%")
+        x = payload.get("x")
+        if x is None or self.model is None:
+            return
+        info = payload.get("info", "")
+        try:
+            from motoropt.geometry import build_motor
+            from motoropt.doe import vary
+            geo = build_motor(vary(self.model, x), self.style)
+        except Exception:
+            return
+        self.fig_opt.clear()
+        ax = self.fig_opt.add_subplot()
+        if self.geo is not None:                         # 기준 형상(회색 윤곽)
+            for poly in (self.geo.stator, self.geo.rotor):
+                self._outline(ax, poly, "#b0b0b0")
+            for p, _, _ in self.geo.magnets:
+                self._outline(ax, p, "#b0b0b0")
+        for poly in (geo.stator, geo.rotor):             # 현재 설계(적색)
+            self._outline(ax, poly, "#d02020")
+        for p, _, _ in geo.magnets:
+            self._outline(ax, p, "#d02020")
+        for c in geo.coils:
+            self._outline(ax, c, "#e08020")
+        lim = geo.region_radius * 1.05
+        ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim); ax.set_aspect("equal")
+        ax.set_title(info or "탐색 중…", fontsize=9)
+        self.cv_opt.draw()
+
+    @staticmethod
+    def _outline(ax, poly, color):
+        from matplotlib.patches import Polygon as MplPoly
+        if poly.geom_type == "MultiPolygon":
+            for gmt in poly.geoms:
+                MainWindow._outline(ax, gmt, color)
+            return
+        ax.add_patch(MplPoly(np.asarray(poly.exterior.coords), closed=True,
+                             fill=False, edgecolor=color, lw=0.7))
 
     def run_doe_build(self):
         if self.aedt_path is None:
@@ -756,6 +829,8 @@ class MainWindow(QMainWindow):
                 f"예상 {len(designs)*per//60}분")
             t0 = time.time()
             n_ok = n_fail = 0
+            N = len(designs)
+            emit = self._cur_geom_emit
             with open(dataset, "a", encoding="utf-8") as f:
                 for i, x in enumerate(designs):
                     r = evaluate_design(model, style, x, I_rms=irms,
@@ -772,15 +847,22 @@ class MainWindow(QMainWindow):
                     else:
                         n_fail += 1
                     el = time.time() - t0
-                    eta = el / (i + 1) * (len(designs) - i - 1)
-                    log(f"{i+1}/{len(designs)} {r['status'][:36]} | "
+                    eta = el / (i + 1) * (N - i - 1)
+                    log(f"{i+1}/{N} {r['status'][:36]} | "
                         f"경과 {el/60:.1f}분 남음 {eta/60:.1f}분")
+                    payload = {"frac": (i + 1) / N,
+                               "info": f"DOE {i+1}/{N}  남음 {eta/60:.1f}분"}
+                    if i % 2 == 0:           # 탐색 중인 형상도 가끔 표시
+                        payload["x"] = x
+                    emit(payload)
             log(f"✅ DOE 완료: 유효 {n_ok} / 실패 {n_fail} → "
                 f"{os.path.basename(dataset)}\n이제 액티브러닝 1라운드를 "
                 "실행하세요.")
             return None
 
-        self._spawn(job, self.log_opt.appendPlainText, self._doe_done)
+        self._spawn(job, self.log_opt.appendPlainText, self._doe_done,
+                    busy_btns=[self.btn_doe, self.btn_active, self.btn_sac],
+                    geom_slot=self._on_opt_update, notify="DOE 생성 완료")
 
     def _doe_done(self, _):
         if self._autofill_spec_from_dataset():
@@ -801,24 +883,31 @@ class MainWindow(QMainWindow):
                 float(self.model["variables"].get("I_rms", 0.0) or 0.0))
 
     def _update_obj_row_state(self, i: int):
-        """유형에 따라 T(목표) 칸 활성/비활성 — larger/smaller는 L·U만 사용."""
+        """방향에 따라 타겟값(T) 칸 활성/비활성 — 최대화·최소화는 L·U만 사용,
+        목표치는 L·T·U 모두 사용. 비활성 칸은 회색 처리."""
         cb = self.tbl_obj.cellWidget(i, 2)
         it = self.tbl_obj.item(i, 4)
         if cb is None or it is None:
             return
-        if cb.currentText() == "target":
+        from PyQt6.QtGui import QColor
+        if cb.currentData() == "target":                 # 목표치 → 타겟값 활성
             it.setFlags(it.flags() | Qt.ItemFlag.ItemIsEditable
                         | Qt.ItemFlag.ItemIsEnabled)
-        else:
+            it.setBackground(QColor("white"))
+            it.setToolTip("목표로 맞출 값")
+        else:                                            # 최대화/최소화 → 비활성
             it.setText("")
             it.setFlags(it.flags() & ~Qt.ItemFlag.ItemIsEditable
                         & ~Qt.ItemFlag.ItemIsEnabled)
+            it.setBackground(QColor("#e8e8e8"))
+            it.setToolTip("최대화·최소화에서는 사용 안 함")
 
     def _set_obj_row(self, key: str, spec: tuple):
         for i in range(self.tbl_obj.rowCount()):
-            if _obj_key(self.tbl_obj.item(i, 1).text()) != key:
+            if self.tbl_obj.item(i, 1).data(Qt.ItemDataRole.UserRole) != key:
                 continue
-            self.tbl_obj.cellWidget(i, 2).setCurrentText(spec[0])
+            cb = self.tbl_obj.cellWidget(i, 2)
+            cb.setCurrentIndex([e for e, _ in TYPE_KO].index(spec[0]))
             vals = ({3: spec[1], 4: spec[2], 5: spec[3]}
                     if spec[0] == "target" else {3: spec[1], 5: spec[2]})
             for c in (3, 4, 5):
@@ -917,14 +1006,31 @@ class MainWindow(QMainWindow):
             save(mdl, sc, surro, y_keys=ykeys)
             if "efficiency" in ykeys:
                 log("ℹ 데이터셋에 efficiency 포함 → DE 탐색이 효율도 직접 최적화")
+            t0 = time.time()
+            emit = self._cur_geom_emit
+            emit({"frac": 0.10, "info": "서로게이트 학습 완료 → DE 탐색"})
             obj = SurrogateObjective(surro, bounds, spec=spec)
             log(f"DE 최적화 (샘플 {len(X)}, δ*={delta:.1f}°, "
                 f"I={irms:.2f}A)...")
+            maxit = 250
+            st = {"g": 0}
+
+            def cb(xk, convergence=None):            # 세대마다 진행·형상 표시
+                st["g"] += 1
+                gi = st["g"]
+                frac = 0.10 + 0.65 * min(gi / maxit, 1.0)
+                if gi % 3 == 0 or gi == 1:
+                    xd_i = dict(zip(X_KEYS, map(float, obj.x_of(xk))))
+                    emit({"x": xd_i, "frac": frac,
+                          "info": f"DE 탐색 {gi}세대  D={float(obj.D(xk)[0]):.3f}"})
+
             r = differential_evolution(lambda u: -obj.D(u)[0],
                                        [(0, 1)] * 5, seed=0,
-                                       maxiter=250, tol=1e-8)
+                                       maxiter=maxit, tol=1e-8, callback=cb)
             xd = dict(zip(X_KEYS, map(float, obj.x_of(r.x))))
             eta_note = " + 효율 부하스윕(~+60초)" if want_eff else ""
+            emit({"x": xd, "frac": 0.80,
+                  "info": f"DE 완료 D={-r.fun:.3f} → FEM 검증 중"})
             log(f"서로게이트 D={-r.fun:.4f} → FEM 검증 중 (~30초{eta_note})...")
             fem = evaluate_design(model, style, xd, I_rms=irms or None,
                                   delta_e_deg=delta, with_efficiency=want_eff,
@@ -935,18 +1041,23 @@ class MainWindow(QMainWindow):
             with open(dataset, "a") as f:
                 f.write(json.dumps(fem) + "\n")
             if fem["status"] != "ok":
+                emit({"frac": 1.0, "info": "FEM 실패"})
                 log(f"FEM 실패: {fem['status'][:40]}")
                 return None
             D = desirability_from_dict(fem, spec)   # efficiency 포함 검증 D
+            emit({"x": xd, "frac": 1.0, "info": f"완료 D={D:.3f}"})
             msg = (f"FEM D={D:.4f} | T={fem['T_avg']:.1f} "
                    f"EMF={fem['emf_rms']:.3f} A={fem['magnet_area']:.1f}")
             if "efficiency" in fem:
                 msg += (f" η={fem['efficiency']*100:.1f}% "
                         f"(P_fe {fem['P_fe']:.1f} P_cu {fem['P_cu']:.1f}W)")
             log(msg)
+            log(f"✅ 액티브러닝 1라운드 완료 (소요 {(time.time()-t0)/60:.1f}분)")
             return (D, xd, fem)
 
-        self._spawn(job, self.log_opt.appendPlainText, self._cand_done)
+        self._spawn(job, self.log_opt.appendPlainText, self._cand_done,
+                    busy_btns=[self.btn_doe, self.btn_active, self.btn_sac],
+                    geom_slot=self._on_opt_update, notify="액티브러닝 완료")
 
     def run_sac_improve(self):
         if self.model is None:
@@ -988,14 +1099,20 @@ class MainWindow(QMainWindow):
                 log("⚠ 학습된 정책(sac_actor.pt) 없음 — 무작위 초기 정책으로 "
                     "동작해 개선 효과가 없습니다. SAC 학습(P6) 후 사용 권장, "
                     "단발 최적화는 액티브러닝 버튼이 더 정확합니다.")
+            emit = self._cur_geom_emit
             s = env._obs()
             for t in range(env.h):
                 s, _, _ = env.step(agent.act(s, deterministic=True))
+                xd_i = dict(zip(obj.keys, map(float, obj.x_of(env.u))))
+                emit({"x": xd_i, "frac": (t + 1) / env.h,
+                      "info": f"SAC {t+1}/{env.h}스텝  D={env.D:.3f}"})
             xd = dict(zip(obj.keys, map(float, obj.x_of(env.u))))
-            log(f"개선 후 D={env.D:.4f} → {xd}")
+            log(f"✅ SAC 개선 완료: D={env.D:.4f} → {xd}")
             return None
 
-        self._spawn(job, self.log_opt.appendPlainText, lambda *_: None)
+        self._spawn(job, self.log_opt.appendPlainText, lambda *_: None,
+                    busy_btns=[self.btn_doe, self.btn_active, self.btn_sac],
+                    geom_slot=self._on_opt_update, notify="SAC 개선 완료")
 
     def _cand_done(self, out):
         if out is None:
@@ -1079,8 +1196,7 @@ class MainWindow(QMainWindow):
 
         rows = [("종합 만족도 D", "—", f"{D:.4f}")]
         for key, s in spec.items():
-            unit = OBJ_UNITS.get(key, "")
-            name = f"{key} [{unit}]" if unit else key
+            name = resp_label(key)
             b = base_of(key)
             b_txt = f"{b:.4g}" if b is not None else "—"
             if key in fem:                       # FEM 검증된 응답
@@ -1145,11 +1261,33 @@ class MainWindow(QMainWindow):
         return (os.path.join(_ROOT, f"doe_{tag}{cur}.jsonl"),
                 os.path.join(_ROOT, f"surrogate_{tag}{cur}.joblib"))
 
-    def _spawn(self, job, log_slot, done_slot):
+    def _spawn(self, job, log_slot, done_slot, busy_btns=None,
+               geom_slot=None, notify=None):
         wk = Worker(job)
         wk.log.connect(log_slot)
         wk.done.connect(done_slot)
         wk.failed.connect(lambda e: log_slot("오류:\n" + e))
+        if geom_slot is not None:
+            wk.geom.connect(geom_slot)
+        self._cur_geom_emit = wk.geom.emit       # 잡이 형상을 보낼 통로
+        btns = list(busy_btns or [])
+        labels = [(b, b.text()) for b in btns]
+        for b in btns:
+            b.setEnabled(False)
+            b.setText("⏳ 실행 중…")
+
+        def _finish(ok):
+            for b, t in labels:
+                b.setEnabled(True); b.setText(t)
+            if notify:
+                self.statusBar().showMessage(
+                    ("✅ " if ok else "⚠ ") + notify, 8000)
+            try:
+                QApplication.beep()
+            except Exception:
+                pass
+        wk.done.connect(lambda *_: _finish(True))
+        wk.failed.connect(lambda *_: _finish(False))
         wk.finished.connect(lambda: self._workers.remove(wk))
         self._workers.append(wk)
         wk.start()
