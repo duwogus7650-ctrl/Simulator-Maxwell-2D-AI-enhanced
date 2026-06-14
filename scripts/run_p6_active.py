@@ -34,7 +34,7 @@ for rnd in range(1, 5):
     r = fem(xd)
     ok = r["status"] == "ok"
     Dtrue = D_of_row(r) if ok else 0.0
-    with open(DATA, "a") as f:
+    with open(DATA, "a", encoding="utf-8") as f:
         f.write(json.dumps(r) + "\n")
     print(f"[라운드 {rnd}] 서로게이트 D={-res.fun:.4f} → FEM D={Dtrue:.4f} "
           f"({'ok' if ok else r['status'][:25]}) {time.time()-t0:.0f}s", flush=True)

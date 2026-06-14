@@ -1295,7 +1295,7 @@ class MainWindow(QMainWindow):
                                   with_current_min=want_cmin,
                                   rpm=rpm, d_cu_mm=d_cu, strands=strands,
                                   T_cu_C=tcu, R_ph_ohm=rph)
-            with open(dataset, "a") as f:
+            with open(dataset, "a", encoding="utf-8") as f:
                 f.write(json.dumps(fem) + "\n")
             if fem["status"] != "ok":
                 emit({"frac": 1.0, "info": "FEM 실패"})

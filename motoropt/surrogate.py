@@ -30,7 +30,7 @@ def dataset_y_keys(rows) -> list:
 def load_dataset(path: str):
     """→ (X, Y, y_keys). y_keys는 데이터셋에 실제로 있는 응답 집합."""
     rows = []
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:        # Windows cp949 회피(한글 포함)
         for line in f:
             line = line.strip()
             if line:

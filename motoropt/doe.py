@@ -327,7 +327,7 @@ def run_doe(aedt_path: str, n: int = 200, out_path: str = "doe_results.jsonl",
 
     done_keys = set()
     if resume and os.path.exists(out_path):
-        with open(out_path) as f:
+        with open(out_path, encoding="utf-8") as f:    # cp949 회피
             for line in f:
                 try:
                     done_keys.add(tuple(round(val, 9) for val in
@@ -341,7 +341,7 @@ def run_doe(aedt_path: str, n: int = 200, out_path: str = "doe_results.jsonl",
     t_start = _time.process_time()   # 컨테이너 정지 무관 CPU 시간
 
     done = 0
-    with open(out_path, "a") as f:
+    with open(out_path, "a", encoding="utf-8") as f:
         if nproc <= 1:
             _init(aedt_path)
             it = map(_eval, designs)

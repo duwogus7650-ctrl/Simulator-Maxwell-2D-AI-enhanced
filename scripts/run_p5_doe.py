@@ -30,13 +30,13 @@ def child(x, q):
 def main():
     done = set()
     if os.path.exists(OUT):
-        for line in open(OUT):
+        for line in open(OUT, encoding="utf-8"):
             try: done.add(key_of(json.loads(line)["x"]))
             except Exception: pass
     todo = [d for d in design_list() if key_of(d) not in done]
     print(f"남은 설계 {len(todo)}개 (완료 {len(done)} 스킵)", flush=True)
     ctx = mp.get_context("fork")
-    with open(OUT, "a") as f:
+    with open(OUT, "a", encoding="utf-8") as f:
         for i, x in enumerate(todo):
             q = ctx.Queue()
             p = ctx.Process(target=child, args=(x, q))
