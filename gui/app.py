@@ -44,8 +44,8 @@ from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QApplication, QComboBox, QDoubleSpinBox, QFileDialog, QGridLayout,
     QGroupBox, QHBoxLayout, QHeaderView, QLabel, QMainWindow, QMessageBox,
-    QPlainTextEdit, QProgressBar, QPushButton, QSplitter, QTableWidget,
-    QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
+    QPlainTextEdit, QProgressBar, QPushButton, QSizeGrip, QSplitter,
+    QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget)
 
 import matplotlib
 matplotlib.use("QtAgg")
@@ -81,10 +81,20 @@ DARK_QSS = """
 QMainWindow, QWidget { background: #0b0f1a; }
 QToolTip { background: #111a2b; color: #cdd7e6; border: 1px solid #2a3a59; }
 
-/* 상단 헤더 바 */
-#Header { background: #0d1424; border-bottom: 2px solid #15324a; }
+/* 프레임리스 루트 — 1px 테두리(둥근 모서리는 마스크가 처리) */
+#Root { background: #0b0f1a; border: 1px solid #243450; border-radius: 11px; }
+
+/* 상단 헤더 바 (통합 타이틀바) */
+#Header { background: #0d1424; border-bottom: 2px solid #15324a;
+          border-top-left-radius: 11px; border-top-right-radius: 11px; }
 #HeaderTitle { font-size: 19px; font-weight: 700; letter-spacing: 1px; }
 #HeaderSub  { color: #6f7f99; font-size: 11px; letter-spacing: 2px; }
+
+/* 창 제어 버튼(최소화·최대화·닫기) */
+#WinBtn, #WinClose { background: transparent; border: none; color: #8896ad;
+    font-size: 13px; font-weight: 400; border-radius: 5px; }
+#WinBtn:hover { background: #1d2f4f; color: #e3eaf6; }
+#WinClose:hover { background: #c0392b; color: #ffffff; }
 
 /* 탭 */
 QTabWidget::pane { border: 1px solid #1d2a44; background: #0b0f1a; top: -1px; }
@@ -318,11 +328,39 @@ class Worker(QThread):
             self.failed.emit(traceback.format_exc())
 
 
+class _DragBar(QWidget):
+    """프레임리스 창 상단 바 — 드래그로 창 이동, 더블클릭으로 최대화 토글."""
+
+    def __init__(self, win):
+        super().__init__()
+        self._win = win
+        self._press = None
+
+    def mousePressEvent(self, e):
+        if (e.button() == Qt.MouseButton.LeftButton
+                and not self._win.isMaximized()):
+            self._press = (e.globalPosition().toPoint()
+                           - self._win.frameGeometry().topLeft())
+            e.accept()
+
+    def mouseMoveEvent(self, e):
+        if self._press is not None and e.buttons() & Qt.MouseButton.LeftButton:
+            self._win.move(e.globalPosition().toPoint() - self._press)
+            e.accept()
+
+    def mouseReleaseEvent(self, e):
+        self._press = None
+
+    def mouseDoubleClickEvent(self, e):
+        self._win._toggle_max()
+
+
 # ================================================================ 메인 윈도
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("motoropt — Maxwell 2D AI-enhanced")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)   # 창 직접 그림
         self.resize(1280, 800)
         self.model = None          # 파싱된 aedt 모델
         self.style = None
@@ -345,9 +383,9 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._tab_result(), "⑤ Result")
         self.tabs = tabs
 
-        # 상단 브랜드 헤더 (mini motor-cad 스타일)
-        header = QWidget(); header.setObjectName("Header")
-        hl = QHBoxLayout(header); hl.setContentsMargins(16, 8, 16, 8)
+        # 상단 브랜드 헤더 + 통합 타이틀바 (mini motor-cad 스타일)
+        header = _DragBar(self); header.setObjectName("Header")
+        hl = QHBoxLayout(header); hl.setContentsMargins(16, 6, 8, 6)
         title = QLabel("MOTOR<span style='color:#36cdd6'>OPT</span>")
         title.setObjectName("HeaderTitle")
         sub = QLabel("MAXWELL 2D · AI MOTOR DESIGN")
@@ -355,13 +393,37 @@ class MainWindow(QMainWindow):
         hl.addWidget(title); hl.addSpacing(12); hl.addWidget(sub); hl.addStretch()
         self.lbl_header_model = QLabel("모델 없음")
         self.lbl_header_model.setObjectName("HeaderSub")
-        hl.addWidget(self.lbl_header_model)
+        hl.addWidget(self.lbl_header_model); hl.addSpacing(14)
+        for txt, nm, slot in (("─", "WinBtn", self.showMinimized),
+                              ("☐", "WinBtn", self._toggle_max),
+                              ("✕", "WinClose", self.close)):
+            b = QPushButton(txt); b.setObjectName(nm)
+            b.setFixedSize(38, 26); b.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            b.clicked.connect(slot); hl.addWidget(b)
 
-        central = QWidget(); v = QVBoxLayout(central)
+        central = QWidget(); central.setObjectName("Root")
+        v = QVBoxLayout(central)
         v.setContentsMargins(0, 0, 0, 0); v.setSpacing(0)
         v.addWidget(header); v.addWidget(tabs, 1)
         self.setCentralWidget(central)
         self.statusBar().showMessage("aedt 파일을 열어 시작하세요")
+        self.statusBar().addPermanentWidget(QSizeGrip(self))   # 우하단 리사이즈
+
+    def _toggle_max(self):
+        self.showNormal() if self.isMaximized() else self.showMaximized()
+
+    def resizeEvent(self, ev):
+        """프레임리스 창 둥근 모서리 — 리사이즈마다 둥근 마스크 적용
+        (최대화 시엔 각진 전체화면)."""
+        super().resizeEvent(ev)
+        if self.isMaximized():
+            self.clearMask()
+            return
+        from PyQt6.QtGui import QPainterPath, QRegion
+        from PyQt6.QtCore import QRectF
+        p = QPainterPath()
+        p.addRoundedRect(QRectF(0, 0, self.width(), self.height()), 11, 11)
+        self.setMask(QRegion(p.toFillPolygon().toPolygon()))
 
     # ---------------------------------------------------------- ① Model
     def _tab_model(self):
