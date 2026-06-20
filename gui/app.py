@@ -1517,7 +1517,15 @@ class MainWindow(QMainWindow):
                 log(f"🔒 하드 제약(반드시 만족): "
                     f"{', '.join(resp_label(k) for k in hard)}")
             mdl, sc, met, _ = train_surrogate(X, Y, y_keys=ykeys)
-            save(mdl, sc, surro, y_keys=ykeys)
+            rel = [k for k in ykeys if met[k]["reliable"]]
+            unrel = [k for k in ykeys if not met[k]["reliable"]]
+            rel_str = ", ".join(f"{k}={met[k]['R2_cv']:.3f}" for k in rel)
+            log(f"서로게이트 CV R²: 신뢰 {rel_str}")
+            if unrel:
+                unrel_str = ", ".join(f"{k}={met[k]['R2_cv']:.2f}"
+                                      for k in unrel)
+                log(f"⚠ 노이즈(최적화 목표 부적합): {unrel_str}")
+            save(mdl, sc, surro, y_keys=ykeys, reliable_keys=rel)
             if "efficiency" in ykeys:
                 log("ℹ 데이터셋에 efficiency 포함 → DE 탐색이 효율도 직접 최적화")
             t0 = time.time()

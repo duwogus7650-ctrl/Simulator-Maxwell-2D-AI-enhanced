@@ -129,8 +129,19 @@ class SurrogateObjective:
         self.model, self.mu, self.sd = b["model"], b["mu"], b["sd"]
         self.keys = b["x_keys"]
         self.y_keys = b.get("y_keys", Y_KEYS)
+        # 신뢰가능(CV R²≥0.5) 응답. 번들에 없으면 하위호환 위해 전부 신뢰로 취급.
+        self.reliable_keys = set(b.get("reliable_keys") or self.y_keys)
         self.spec = spec
         self.hard_keys = hard_keys or set()
+        if self.spec is not None:
+            bad = {k for k in self.spec
+                   if k in self.y_keys and k not in self.reliable_keys
+                   and k not in self.hard_keys}
+            if bad:
+                import warnings
+                warnings.warn(
+                    f"서로게이트 신뢰불가 응답을 소프트 목표로 사용: "
+                    f"{sorted(bad)} (CV R²<0.5, 노이즈) — 최적화 결과 왜곡 위험")
         self.lo = np.array([bounds[k][0] for k in self.keys])
         self.hi = np.array([bounds[k][1] for k in self.keys])
 
