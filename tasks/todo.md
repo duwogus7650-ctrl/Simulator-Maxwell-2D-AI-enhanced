@@ -1,3 +1,32 @@
+# 전면 재검토 + 견고성 하드닝 (2026-06-20)
+
+코드베이스 전체를 4개 도메인(솔버·최적화·AEDT입출력·GUI) 병렬 리뷰 →
+발견 문제 일괄 수정. 커밋 44c640c(서로게이트), 7eb8d91(하드닝 13파일).
+
+- [x] 서로게이트: docstring이 주장만 하던 5-fold CV를 실제 계산. 측정으로
+      ripple_pct/B_tooth/cogging_pp가 CV 음수=노이즈 확정 → reliable 플래그·
+      노이즈 목표 경고. 구조 (64,64)→(16,16)+L2. 구버전 번들 하위호환.
+- [x] 솔버 fail-loud: NR 미수렴 플래그·Arkkio 빈영역·코일 0면적 경고,
+      디리클레 절대→상대공차(대형모터 경계누락), 슬라이딩밴드 잔차 진단.
+- [x] 최적화: DOE 병렬 time_budget·except 분리, sweep 재질 자동검출,
+      d_target 0분모 가드, SAC 언더플로 클램프.
+- [x] AEDT: 다중설계 무차별 치환→첫설계 스코핑+라운드트립 검증, 보자력
+      SI프리픽스 정확화, 파서 크래시 가드, parse_aedt design_name 옵션.
+- [x] GUI: closeEvent 크래시방지·동시솔브 차단·모델 deepcopy·excepthook
+      파일로깅·target 경계 엄격검증·Y/Δ currentData 판정.
+- [x] 회귀 하네스 cp949 이모지 크래시 수정.
+
+## 리뷰
+- **검증: 내전형 7종 회귀 0.000% 편차** (Jun-13 베이스라인과 전 지표 동일) —
+  모든 물리 수정이 FEM 수치 경로를 안 건드림을 입증.
+- 독립 code-reviewer가 잡은 HIGH(mu_rec 최소제곱 변경)는 회귀 0%로 중립 확인.
+- OMC executor(opus)×4 병렬 구현 → code-reviewer 독립 승인 패스 활용.
+- 보류(정직): 다중설계 GUI 선택 UI(요청 대기), 코깅 밴드 연결 수학 재작성
+  (Maxwell 실측 검증 선행 필요 — 이번엔 진단 경고만), 400W_10P12S/14P12S
+  파싱실패(기존 문제 ['K','theta_x1'] 미정의, 범위 밖).
+
+---
+
 # 400W/200W 모델 손실·효율 검증 (PDF Rev1 기준, 2026-06-12)
 
 - [x] 400W.aedt 파싱 확인 (design=4. 400W_BasicModel_Load_Optimized, 37변수)
