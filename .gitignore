@@ -5,3 +5,8 @@ __pycache__/
 *.aedtresults/
 .DS_Store
 venv/
+
+# AI 툴링/세션 상태 (프로그램 일부 아님)
+.bkit/
+.claude/
+.omc/

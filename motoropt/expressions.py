@@ -54,6 +54,9 @@ class _SafeEval(ast.NodeVisitor):
 
     def __init__(self, names: Dict[str, float]):
         self.names = names
+        # Maxwell variable references are case-insensitive; build a lowercased
+        # index so 'D_SO' resolves to a defined 'D_so', 'T_yoke' → 'T_Yoke', etc.
+        self._lower = {k.lower(): v for k, v in names.items()}
 
     def visit(self, node):  # noqa: D102
         if isinstance(node, ast.Expression):
@@ -65,6 +68,12 @@ class _SafeEval(ast.NodeVisitor):
         if isinstance(node, ast.Name):
             if node.id in self.names:
                 return float(self.names[node.id])
+            # Maxwell treats variable names case-insensitively. AEDT files mix
+            # casing in expressions (e.g. 'D_SO' for 'D_so', 'T_yoke' for
+            # 'T_Yoke'); fall back to a case-insensitive lookup.
+            low = node.id.lower()
+            if low in self._lower:
+                return float(self._lower[low])
             if node.id in _ALLOWED_CONSTS:
                 return _ALLOWED_CONSTS[node.id]
             raise KeyError(node.id)
@@ -113,6 +122,18 @@ def resolve_variables(raw: Dict[str, str], max_passes: int = 12) -> Dict[str, fl
     rpm 단위는 보존된다: BaseRPM=4500rpm → 4500.0 (omega 수식이
     '2*PI*BaseRPM/60RPM*...' 형태라 rpm/RPM 계수가 1로 상쇄됨 — Maxwell과 동일 동작).
     """
+    # Maxwell variable names are case-insensitive; a genuine case-collision in
+    # the source (two distinct names differing only by case) is ambiguous —
+    # fail loud rather than silently picking one.
+    _seen: Dict[str, str] = {}
+    for name in raw:
+        low = name.lower()
+        if low in _seen:
+            raise ValueError(
+                f"변수명 대소문자 충돌(Maxwell은 동일 변수로 취급): "
+                f"{_seen[low]!r} vs {name!r}")
+        _seen[low] = name
+
     resolved: Dict[str, float] = {}
     pending = dict(raw)
     for _ in range(max_passes):
