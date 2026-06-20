@@ -3,6 +3,13 @@
 import sys, os, glob, json, time, math, traceback, warnings
 warnings.filterwarnings("ignore")
 sys.path.insert(0, ".")
+# cp949 콘솔(Windows)에서 이모지(✅❌⏭) 출력 시 UnicodeEncodeError로
+# except 경로가 재크래시하던 문제 — stdout/stderr를 UTF-8로 재구성.
+for _s in (sys.stdout, sys.stderr):
+    try:
+        _s.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 import numpy as np
 from motoropt.aedt_parser import (parse_aedt, detect_magnet_style,
                                   detect_material_names)

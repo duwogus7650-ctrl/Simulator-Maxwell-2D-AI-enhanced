@@ -12,6 +12,7 @@ Arkkio법: 공극 환형역 전체에서 Maxwell 응력의 반경 평균
 from __future__ import annotations
 
 import math
+import warnings
 from typing import Dict, List
 
 import numpy as np
@@ -29,6 +30,8 @@ def torque_arkkio(solver, res, r1_mm: float, r2_mm: float,
     r1, r2 = r1_mm * 1e-3, r2_mm * 1e-3
     sel = (~solver.is_steel) & (~solver.is_magnet) & (~solver.is_coil) \
         & (r > r1) & (r < r2)
+    if not sel.any():
+        warnings.warn("Arkkio 적분 영역에 요소 0개 — 토크 0 반환(반경 r1/r2 확인)")
     Br = (res.Bx[sel] * cx[sel] + res.By[sel] * cy[sel]) / r[sel]
     Bt = (-res.Bx[sel] * cy[sel] + res.By[sel] * cx[sel]) / r[sel]
     dS = solver.area[sel]

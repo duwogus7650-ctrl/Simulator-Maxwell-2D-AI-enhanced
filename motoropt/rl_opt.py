@@ -35,6 +35,11 @@ class DesignEnv:
     def step(self, a):
         self.u = np.clip(self.u + self.s * np.asarray(a), 0, 1)
         D2 = float(self.obj.D(self.u)[0])
+        # 주의(텔레스코핑): per-step 보상 (D2-D1)이 에피소드 전체로 합산되면
+        # (D_final - D_start)로 줄어들어, 정책경사는 "무작위 시작점 대비 순개선"
+        # 신호로 학습된다. 절대 D2를 보상으로 쓰면 신호가 현재 만족도에 정렬되나,
+        # 리턴 스케일·Q값이 바뀌어 문서화된 SAC 결과가 불안정해질 수 있어
+        # 의도적으로 수식을 유지한다(개선보상 + 종단 D 보너스).
         r = (D2 - self.D) * 10.0
         self.D = D2
         self.t += 1
@@ -95,7 +100,10 @@ class SAC:
         a = torch.tanh(z)
         logp = (-0.5 * ((z - mu) / std) ** 2 - std.log()
                 - 0.5 * np.log(2 * np.pi)).sum(-1)
-        logp -= torch.log(1 - a ** 2 + 1e-6).sum(-1)
+        # tanh-스쿼시 보정: a→±1 포화 시 log(1-a²)이 언더플로해 엔트로피를
+        # 왜곡 → 보정용 a를 ±(1-1e-6)로 클램프(반환 a는 그대로).
+        a_c = a.clamp(-1.0 + 1e-6, 1.0 - 1e-6)
+        logp -= torch.log(1 - a_c ** 2 + 1e-6).sum(-1)
         return a, logp
 
     def update(self, batch):

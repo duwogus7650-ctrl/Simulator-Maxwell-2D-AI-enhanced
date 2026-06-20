@@ -14,14 +14,22 @@ from .surrogate import X_KEYS, Y_KEYS
 
 
 def d_larger(y, L, U, w=1.0):
+    if U == L:
+        raise ValueError(f"d_larger: U==L=={L} (0으로 나눔 — 스펙 오류)")
     return np.clip((y - L) / (U - L), 0, 1) ** w
 
 
 def d_smaller(y, L, U, w=1.0):
+    if U == L:
+        raise ValueError(f"d_smaller: U==L=={L} (0으로 나눔 — 스펙 오류)")
     return np.clip((U - y) / (U - L), 0, 1) ** w
 
 
 def d_target(y, L, T, U, w=1.0):
+    # 퇴화 스펙(T==L, T==U, L>=U)은 inf/nan을 조용히 만들므로 명확히 거부
+    if not (L < T < U):
+        raise ValueError(
+            f"d_target: L<T<U 여야 함 (L={L}, T={T}, U={U})")
     y = np.asarray(y, float)
     d = np.where(y < T, (y - L) / (T - L), (U - y) / (U - T))
     return np.clip(d, 0, 1) ** w
@@ -106,14 +114,18 @@ def desirability_from_dict(resp: dict, spec: dict,
     hard_keys = hard_keys or set()
     ds = []
     hard = 1.0
+    matched = 0                       # resp에 실제로 존재한 스펙 키 수
     for k, s in spec.items():
         if k in resp and resp[k] is not None:
+            matched += 1
             if k in hard_keys:
                 hard *= float(_hard_pass([resp[k]], s[0], *s[1:])[0])
             else:
                 ds.append(float(_D_FUNCS[s[0]](np.array([resp[k]], float),
                                                *s[1:])[0]))
-    if not ds and not hard_keys:
+    # 스펙 키가 resp에서 하나도 매칭 안 됐으면 평가 자체가 안 된 것 →
+    # 거짓 "완벽(1.0)" 대신 0.0. (하드 키만 있어도 매칭 0이면 평가 불가)
+    if matched == 0:
         return 0.0
     D_soft = float(np.prod(ds) ** (1.0 / len(ds))) if ds else 1.0
     return D_soft * hard

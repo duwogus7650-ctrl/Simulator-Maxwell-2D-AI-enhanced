@@ -12,10 +12,16 @@ warnings.filterwarnings("ignore")
 _CTX: dict = {}
 
 
-def _init(model, style, h_override):
+def _init(model, style, h_override, steel_name=None, magnet_name=None):
     _CTX["model"] = model
     _CTX["style"] = style
     _CTX["h"] = h_override
+    # 재질명 미지정 시 자동 감지 (비-400W 모델에서 잘못된 하드코딩 회피)
+    if steel_name is None or magnet_name is None:
+        from .aedt_parser import detect_material_names
+        steel_name, magnet_name = detect_material_names(model)
+    _CTX["steel"] = steel_name
+    _CTX["magnet"] = magnet_name
 
 
 def _solve_one(angle_deg: float) -> dict:
@@ -29,7 +35,7 @@ def _solve_one(angle_deg: float) -> dict:
     geo = build_motor(v, style, rotor_angle_deg=angle_deg)
     mesh = build_mesh(geo, h=h)
     s = Magnetostatic2D(mesh, model["materials"],
-                        "20PNX1200F_20C", "Arnold_Magnetics_N45UH_80C")
+                        _CTX["steel"], _CTX["magnet"])
     s.set_coil_currents({})
     res = s.solve()
     L = v["L_stk"]
@@ -45,8 +51,15 @@ def _solve_one(angle_deg: float) -> dict:
 
 def sweep(model: dict, style: str, angles_deg: List[float],
           h_override: Dict[str, float] | None = None,
-          nproc: int = 4) -> list:
-    args = (model, style, h_override)
+          nproc: int = 4, *,
+          steel_name: str | None = None,
+          magnet_name: str | None = None) -> list:
+    # 재질명을 부모에서 1회 감지 → 워커들이 동일 재질을 쓰도록 전달
+    # (각 워커가 재감지하면 비용·불일치 위험). 미지정 시 자동 감지.
+    if steel_name is None or magnet_name is None:
+        from .aedt_parser import detect_material_names
+        steel_name, magnet_name = detect_material_names(model)
+    args = (model, style, h_override, steel_name, magnet_name)
     if nproc <= 1:
         _init(*args)
         return [_solve_one(a) for a in angles_deg]

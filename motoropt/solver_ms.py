@@ -12,6 +12,7 @@
 """
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Dict, List
 
@@ -30,6 +31,7 @@ class SolverResult:
     Bmag: np.ndarray
     iterations: int
     residual: float
+    converged: bool = True
 
 
 class Magnetostatic2D:
@@ -79,7 +81,10 @@ class Magnetostatic2D:
         # ---- Dirichlet 절점 (외곽 원) ----------------------------------
         r_nodes = np.hypot(self.V[:, 0], self.V[:, 1])
         self.r_outer = r_nodes.max()
-        self.fixed = np.where(r_nodes > self.r_outer - 3e-5)[0]
+        # 외곽 원은 폴리곤 호(arc)로 근사돼 내부 정점의 새지타(sagitta)가
+        # r에 비례해 커진다. 절대공차(과거 30µm)는 큰 Region에서 호 정점을
+        # 놓쳐 외곽에 자유노드를 남겼다 → 반경 비례 상대공차로 변경.
+        self.fixed = np.where(r_nodes > self.r_outer * (1 - 1e-3))[0]
         self.free = np.setdiff1d(np.arange(len(self.V)), self.fixed)
 
         self.n_nodes = len(self.V)
@@ -100,6 +105,8 @@ class Magnetostatic2D:
             area = self.area[sel].sum()
             if area > 0:
                 self.Jz[sel] = ampturns / area
+            else:
+                warnings.warn(f"코일 {ci} 메시 면적 0 — 전류 미반영")
 
     # ------------------------------------------------------------------
     def _load_vector(self) -> np.ndarray:
@@ -178,9 +185,14 @@ class Magnetostatic2D:
             A = A + alpha * dA
 
         nu, dnu, Bx, By = self._nu_field(A)
+        converged = res <= tol
+        if not converged:
+            warnings.warn(
+                f"NR 미수렴: res={res:.2e} > tol={tol:.2e} ({max_iter}회)")
         return SolverResult(A=A, Bx=Bx, By=By,
                             Bmag=np.hypot(Bx, By),
-                            iterations=it, residual=float(res))
+                            iterations=it, residual=float(res),
+                            converged=converged)
 
     # ------------------------------------------------------------------
     def _assemble(self, Ke: np.ndarray) -> sp.csr_matrix:

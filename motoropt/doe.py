@@ -28,6 +28,12 @@ from .postproc import (torque_arkkio, coenergy, build_winding_map,
 DELTA_E_DEG = 290.0          # P4 캘리브레이션 MTPA 전기위상 (권선/극배치 고정)
 RPM_EMF = 1000.0
 
+# 설계 평가에서 "정상적인 설계 실패"로 취급할 예외 — 형상 불완전(ValueError),
+# 메시 폭주(ValueError), 솔버 발산/특이행렬(RuntimeError·LinAlgError) 등.
+# 이 밖의 예외(NameError·KeyError 등 하네스 버그)는 별도 태그로 노출한다.
+_DESIGN_FAIL = (ValueError, RuntimeError, ArithmeticError,
+                np.linalg.LinAlgError)
+
 BOUNDS = {
     "a_m":        (0.80, 0.95),
     "T_m":        (1.8, 2.6),
@@ -304,8 +310,13 @@ def evaluate_design(model: dict, style: str, x: Dict[str, float],
                 out["P_cu"] = float(rr["P_cu"])
                 # 리플은 36스텝 전주기 스윕값으로 대체(8스텝 base보다 정밀, 공짜)
                 out["ripple_pct"] = float(rr["T_ripple_pct"])
-    except Exception as e:  # noqa: BLE001
+    except _DESIGN_FAIL as e:
+        # 예상되는 형상/메시/솔버 실패 = 설계 탈락 (정상)
         out["status"] = f"fail: {type(e).__name__}: {e}"
+    except Exception as e:  # noqa: BLE001
+        # 예상 못한 예외 = 하네스 버그(NameError/KeyError 등) — 설계 실패와
+        # 구분되게 별도 태그. KeyboardInterrupt는 Exception이 아니라 전파됨.
+        out["status"] = f"ERROR(bug): {type(e).__name__}: {e}"
     return out
 
 
@@ -335,9 +346,16 @@ def run_doe(aedt_path: str, n: int = 200, out_path: str = "doe_results.jsonl",
     hi = np.array([BOUNDS[k][1] for k in keys])
     X = qmc.LatinHypercube(d=len(keys), seed=seed).random(n) * (hi - lo) + lo
     designs = [dict(zip(keys, map(float, row))) for row in X]
-    # 기준 설계도 포함 (코너 케이스 검증용)
-    designs.insert(0, {"a_m": 0.89, "T_m": 2.2, "T_m2_ratio": 2.02 / 2.2,
-                       "W_t": 3.5, "MagnetR": 0.8})
+    # 기준 설계도 포함 (코너 케이스 검증용) — BOUNDS 안에 있는지 확인 후 클립
+    base = {"a_m": 0.89, "T_m": 2.2, "T_m2_ratio": 2.02 / 2.2,
+            "W_t": 3.5, "MagnetR": 0.8}
+    for k in keys:
+        klo, khi = BOUNDS[k]
+        if not (klo <= base[k] <= khi):
+            print(f"경고: 기준 설계 {k}={base[k]}가 BOUNDS[{klo},{khi}] 밖 "
+                  f"— 클립함", flush=True)
+            base[k] = min(max(base[k], klo), khi)
+    designs.insert(0, base)
 
     done_keys = set()
     if resume and os.path.exists(out_path):
@@ -352,7 +370,9 @@ def run_doe(aedt_path: str, n: int = 200, out_path: str = "doe_results.jsonl",
                if tuple(round(val, 9) for val in d.values()) not in done_keys]
     print(f"남은 설계 {len(designs)}개 (완료 {len(done_keys)}개 스킵)",
           flush=True)
-    t_start = _time.process_time()   # 컨테이너 정지 무관 CPU 시간
+    # 벽시계(wall clock) — 멀티프로세싱에선 워커 CPU가 부모 process_time에
+    # 안 잡혀 예산판정이 무의미. monotonic으로 단일/병렬 동작을 일치시킨다.
+    t_start = _time.monotonic()
 
     done = 0
     with open(out_path, "a", encoding="utf-8") as f:
@@ -364,8 +384,8 @@ def run_doe(aedt_path: str, n: int = 200, out_path: str = "doe_results.jsonl",
                 done += 1
                 if done % 5 == 0:
                     print(f"{done}/{len(designs)} "
-                          f"cpu {_time.process_time()-t_start:.0f}s", flush=True)
-                if time_budget and _time.process_time() - t_start > time_budget:
+                          f"{_time.monotonic()-t_start:.0f}s", flush=True)
+                if time_budget and _time.monotonic() - t_start > time_budget:
                     print("시간 예산 도달 — 체크포인트 후 종료", flush=True)
                     return
         else:
@@ -373,9 +393,18 @@ def run_doe(aedt_path: str, n: int = 200, out_path: str = "doe_results.jsonl",
             with mp.get_context("spawn").Pool(
                     nproc, initializer=_init,
                     initargs=(aedt_path,)) as pool:
-                for r in pool.imap_unordered(_eval, designs, chunksize=1):
+                it = pool.imap_unordered(_eval, designs, chunksize=1)
+                for r in it:
                     f.write(json.dumps(r) + "\n"); f.flush()
                     done += 1
                     if done % 10 == 0:
-                        print(f"{done}/{len(designs)}", flush=True)
+                        print(f"{done}/{len(designs)} "
+                              f"{_time.monotonic()-t_start:.0f}s", flush=True)
+                    # 예산 초과 시 신규 결과 수신 중단 — 진행 중인 작업은
+                    # 받지 않고 풀을 종료(with-블록 __exit__가 terminate).
+                    if time_budget and \
+                            _time.monotonic() - t_start > time_budget:
+                        print("시간 예산 도달 — 체크포인트 후 종료", flush=True)
+                        pool.terminate()
+                        return
     print("DOE DONE")

@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 from typing import Dict
 
 import numpy as np
@@ -194,7 +195,17 @@ class SlidingBandMesh:
 
         # ---- 밴드 연결: 내측 j ↔ 외측 m(j) -----------------------------
         # 내측 노드 j의 현재 각도 = j·pitch + th (idx_i가 각도순이므로)
+        # 알려진 한계: 로터 정점은 정확히 th로 회전하지만 밴드 연결은
+        # 정수 셀 시프트 k로 양자화돼 ±pitch/2의 각도 전단 잔차가 남는다
+        # (코깅 검증은 별도 과제). 잔차가 크면 진단 경고만 낸다.
         k = int(round(th / self.pitch))
+        resid = abs(th / self.pitch - k)
+        if resid > 0.1 and not getattr(self, "_resid_warned", False):
+            # 인스턴스당 1회만 — 미세각 스윕(코깅)에서 매 스텝 스팸 방지
+            self._resid_warned = True
+            warnings.warn(
+                f"슬라이딩 밴드 각도 잔차 {resid:.2f}셀 — "
+                f"코깅 미세토크에 계통오차 가능 (이후 동일 경고 생략)")
         n = self.n
         j = np.arange(n)
         in_a = self.idx_i[j]

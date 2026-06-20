@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -99,10 +100,38 @@ def _extract_variables(design: Node) -> Dict[str, str]:
     return out
 
 
-def _extract_bh(points_line: str) -> List[List[float]]:
+def _extract_bh(points_line: str, mat_name: str = "?") -> List[List[float]]:
     m = re.search(r"Points\[\d+:\s*(.*)\]", points_line)
+    if m is None:
+        raise ValueError(
+            f"재질 '{mat_name}' BH 곡선 Points 라인 파싱 실패: {points_line.strip()!r}")
     vals = [float(v) for v in m.group(1).split(",")]
+    if len(vals) % 2 != 0:
+        raise ValueError(
+            f"재질 '{mat_name}' BH 곡선 좌표 개수가 홀수({len(vals)}개) — "
+            f"(H,B) 쌍이 맞지 않음")
     return [[vals[i], vals[i + 1]] for i in range(0, len(vals), 2)]
+
+
+# 보자력은 현실적으로 A/m·kA/m(드물게 MA/m)만 — milli/micro/nano 등 비현실
+# 프리픽스를 허용하면 ×1e-3로 조용히 틀어지므로 거부(파싱 실패로 큰소리)한다.
+_COERCIVITY_RE = re.compile(
+    r"^\s*([+-]?\d+\.?\d*(?:[eE][+-]?\d+)?)\s*([kKM]?)A_per_m(?:eter)?\s*$")
+_SI_PREFIX = {"": 1.0, "k": 1e3, "K": 1e3, "M": 1e6}
+
+
+def _parse_coercivity(mag: str, mat_name: str = "?") -> float:
+    """'-1047400A_per_meter' / '-1.05MA_per_m' → A/m (SI 프리픽스 반영).
+
+    naive regex 절단(예: kA_per_m의 k를 버려 1000배 오차)을 피하기 위해
+    SI 프리픽스를 명시적으로 처리한다.
+    """
+    m = _COERCIVITY_RE.match(mag.strip())
+    if m is None:
+        raise ValueError(
+            f"재질 '{mat_name}' 보자력 단위 파싱 실패: {mag!r} "
+            f"(예상 형식 '-1047400A_per_meter')")
+    return float(m.group(1)) * _SI_PREFIX[m.group(2)]
 
 
 def _extract_materials(project: Node) -> Dict[str, dict]:
@@ -117,7 +146,7 @@ def _extract_materials(project: Node) -> Dict[str, dict]:
             bh_node = perm.find("BHCoordinates")
             for line in bh_node.props:
                 if line.strip().startswith("Points["):
-                    info["bh_curve"] = _extract_bh(line)
+                    info["bh_curve"] = _extract_bh(line, m.name)
             info["permeability"] = "nonlinear"
         else:
             mu = m.get("permeability")
@@ -125,7 +154,7 @@ def _extract_materials(project: Node) -> Dict[str, dict]:
         coer = m.find("magnetic_coercivity")
         if coer is not None:
             mag = coer.get("Magnitude")
-            info["coercivity_A_per_m"] = float(re.sub(r"[A-Za-z_]+$", "", mag))
+            info["coercivity_A_per_m"] = _parse_coercivity(mag, m.name)
             info["coercivity_dir"] = [
                 float(coer.get("DirComp1") or 0),
                 float(coer.get("DirComp2") or 0),
@@ -226,6 +255,8 @@ def _extract_parts(design: Node) -> List[dict]:
             continue
         for gp in scope.find_all("GeometryPart"):
             attrs = gp.find("Attributes")
+            if attrs is None:
+                continue
             ops_node = gp.find("Operations")
             ops = [_extract_operation(o) for o in ops_node.find_all("Operation")] \
                 if ops_node else []
@@ -249,7 +280,7 @@ def _extract_boundaries(design: Node) -> dict:
         bt = b.get("BoundType")
         if bt == "Winding Group":
             windings[b.name] = {
-                "id": int(b.get("ID")),
+                "id": int(b.get("ID") or 0),
                 "type": b.get("Type"),
                 "current_expr": b.get("Current"),
                 "parallel_branches": b.get("ParallelBranchesNum"),
@@ -259,7 +290,7 @@ def _extract_boundaries(design: Node) -> dict:
             objs = re.search(r"Objects\((.*)\)", "\n".join(b.props))
             coils.append({
                 "name": b.name,
-                "winding_id": int(b.get("Winding")),
+                "winding_id": int(b.get("Winding") or 0),
                 "conductor_number": b.get("'Conductor number'") or b.get("Conductor number"),
                 "polarity": b.get("PolarityType"),
                 "object_ids": [int(x) for x in objs.group(1).split(",")] if objs else [],
@@ -317,15 +348,36 @@ def _extract_mesh_ops(design: Node) -> List[dict]:
 # ---------------------------------------------------------------- 메인 API
 
 
-def parse_aedt(path: str) -> dict:
-    """단일 Maxwell2D 디자인을 내부 표준 스키마로 파싱."""
+def parse_aedt(path: str, design_name: str | None = None) -> dict:
+    """단일 Maxwell2D 디자인을 내부 표준 스키마로 파싱.
+
+    design_name=None(기본): 파일 내 첫 Maxwell2D 디자인 선택(기존 동작).
+    다중 설계 파일이면 경고(warnings.warn)로 무시되는 설계를 알린다.
+    design_name 지정 시 같은 이름의 설계를 선택한다(없으면 ValueError).
+    다중 설계 *선택 UI*는 지원하지 않는다 — 본 함수는 단일 설계만 반환.
+    """
     with open(path, encoding="utf-8", errors="replace") as f:
         text = f.read()
     root = parse_tree(text)
     project = root.find_deep("AnsoftProject")
-    design = project.find_deep("Maxwell2DModel")
-    if design is None:
+    designs = project.find_all_deep("Maxwell2DModel") if project else []
+    if not designs:
         raise ValueError("Maxwell2D 디자인을 찾을 수 없습니다")
+
+    if design_name is not None:
+        design = next((d for d in designs if d.get("Name") == design_name), None)
+        if design is None:
+            avail = ", ".join(d.get("Name") or "?" for d in designs)
+            raise ValueError(
+                f"설계 '{design_name}' 을(를) 찾을 수 없습니다 — 파일 내 설계: {avail}")
+    else:
+        design = designs[0]
+        if len(designs) > 1:
+            others = ", ".join(d.get("Name") or "?" for d in designs[1:])
+            warnings.warn(
+                f"파일에 설계 {len(designs)}개 — 첫 설계 "
+                f"'{design.get('Name')}'만 해석. 나머지 무시됨: {others}",
+                stacklevel=2)
 
     raw_vars = _extract_variables(design)
     model = {

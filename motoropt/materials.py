@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 from scipy.interpolate import PchipInterpolator
 
@@ -32,10 +34,23 @@ class NuCurve:
         B, H = arr[order, 1], arr[order, 0]
         keep = np.concatenate([[True], np.diff(B) > 1e-12])
         self.B, self.H = B[keep], H[keep]
+        if len(self.B) < 2:
+            # BH 테이블이 단일 점으로 축약 — PCHIP·B[1] 모두 불가.
+            # 공기 등가(ν0) 선형 모델로 안전 폴백한다.
+            warnings.warn(
+                "BH 테이블 유효점 < 2 — 비선형 곡선 불가, 공기 등가 선형 폴백")
+            self._h_of_b = None
+            self._dh_db = None
+            self.B_max = float(self.B[0]) if len(self.B) else 0.0
+            self.H_max = float(self.H[0]) if len(self.H) else 0.0
+            self.b_small = self.B_max if self.B_max > 0 else 1.0
+            self.nu_init = NU0
+            return
         self._h_of_b = PchipInterpolator(self.B, self.H, extrapolate=False)
         self._dh_db = self._h_of_b.derivative()
         self.B_max = self.B[-1]
         self.H_max = self.H[-1]
+        self.b_small = self.B[1]
         # 초기 투자율 (B→0 극한): ν0 = dH/dB(0)
         self.nu_init = float(self._dh_db(self.B[1] * 0.5))
 
@@ -45,8 +60,10 @@ class NuCurve:
         B = np.sqrt(b2)
         nu = np.full_like(B, self.nu_init)
         dnu = np.zeros_like(B)
+        if self._h_of_b is None:        # 단일 점 폴백 — 전 구간 공기 등가
+            return nu, dnu
 
-        small = B < self.B[1] * 0.5
+        small = B < self.b_small * 0.5
         inside = (~small) & (B <= self.B_max)
         beyond = B > self.B_max
 
@@ -73,13 +90,25 @@ class PMLinear:
             arr = np.asarray(bh, float)
             i0 = int(np.argmin(np.abs(arr[:, 0])))      # H=0 근방
             self.Br = float(arr[i0, 1])
-            i1 = max(i0 - 4, 0)
-            dB = arr[i0, 1] - arr[i1, 1]
-            dH = arr[i0, 0] - arr[i1, 0]
-            self.mu_rec = float(dB / dH / MU0)
+            # 리코일 기울기 dB/dH = μ0·μ_rec 를 H=0 근방 선형 구간에서
+            # 최소제곱 피팅한다. 고정 4점 후방차분은 희소·비균일 데마그
+            # 테이블에서 불안정 → H=0에 가장 가까운 몇 점(기본 5점)으로 회귀.
+            Harr, Barr = arr[:, 0], arr[:, 1]
+            order = np.argsort(np.abs(Harr - Harr[i0]))  # H=0 근접순
+            win = order[:min(5, len(order))]
+            if len(win) >= 2 and np.ptp(Harr[win]) > 0:
+                slope = float(np.polyfit(Harr[win], Barr[win], 1)[0])
+            else:                                        # 폴백: 2점 차분
+                i1 = max(i0 - 4, 0)
+                slope = ((arr[i0, 1] - arr[i1, 1])
+                         / (arr[i0, 0] - arr[i1, 0]))
+            self.mu_rec = float(slope / MU0)
             # 고유(intrinsic) J-H 곡선 감지: 무릎 전 평탄 → 기울기≈0.
             # 노멀 곡선 B=J+μ0H 이므로 μ_rec(normal)=μ_rec(intr)+1.
             if self.mu_rec < 0.5:
+                warnings.warn(
+                    f"데마그 기울기 μ_rec={self.mu_rec:.3f}<0.5 — "
+                    f"고유(J-H) 곡선으로 가정하고 +1.0 보정(노멀 B-H 변환)")
                 self.mu_rec += 1.0
         else:
             self.Br, self.mu_rec = br, mu_rec

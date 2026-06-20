@@ -7,6 +7,8 @@
 """
 from __future__ import annotations
 
+import copy
+import glob
 import json
 import math
 import os
@@ -289,9 +291,10 @@ def _obj_key(text: str) -> str:
     return text.split(" [")[0].strip()
 
 
-def _error_dialog(parent, title: str, exc: BaseException):
+def _error_dialog(parent, title: str, exc: BaseException, log_path=None):
     """예외 → 사용자 안내 다이얼로그. PyQt6는 슬롯 내 미처리 예외 시
-    앱을 abort시키므로 사용자 동작 슬롯은 반드시 이걸로 감싼다."""
+    앱을 abort시키므로 사용자 동작 슬롯은 반드시 이걸로 감싼다.
+    log_path가 주어지면 전체 트레이스백이 기록된 파일 경로를 안내한다."""
     if isinstance(exc, ModuleNotFoundError):
         msg = (f"필요한 패키지가 없습니다: {exc.name}\n\n"
                "venv의 Python으로 실행하세요:\n"
@@ -302,6 +305,8 @@ def _error_dialog(parent, title: str, exc: BaseException):
                f"(필수 변수 {exc} 없음)")
     else:
         msg = f"{type(exc).__name__}: {exc}"
+    if log_path:
+        msg += f"\n\n전체 로그 기록: {log_path}"
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Critical)
     box.setWindowTitle(title)
@@ -425,6 +430,45 @@ class MainWindow(QMainWindow):
         p.addRoundedRect(QRectF(0, 0, self.width(), self.height()), 11, 11)
         self.setMask(QRegion(p.toFillPolygon().toPolygon()))
 
+    def closeEvent(self, event):
+        """해석 워커가 도는 중 창을 닫으면, 워커가 삭제된 Qt 객체로 시그널을
+        보내 앱이 죽을 수 있다. 진행 중 워커가 있으면 종료 여부를 확인하고,
+        확인 시 시그널을 끊고 스레드를 정리한 뒤 닫는다."""
+        live = [wk for wk in getattr(self, "_workers", [])
+                if wk is not None and wk.isRunning()]
+        if live:
+            ans = QMessageBox.question(
+                self, "종료 확인",
+                "작업 진행 중 — 종료하면 중단됩니다. 종료할까요?",
+                QMessageBox.StandardButton.Yes
+                | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+            if ans != QMessageBox.StandardButton.Yes:
+                event.ignore()
+                return
+            # 닫히는 윈도(=삭제될 슬롯)로 더는 시그널이 가지 않도록 끊고,
+            # 협조적 중단을 요청한 뒤 잠깐 기다린다(중단을 지원하지 않아도
+            # 시그널이 끊겨 있으면 죽은 객체 접근은 일어나지 않는다).
+            for wk in live:
+                try:
+                    wk.blockSignals(True)
+                except Exception:
+                    pass
+                try:
+                    wk.requestInterruption()
+                except Exception:
+                    pass
+                try:
+                    wk.quit()
+                except Exception:
+                    pass
+            for wk in live:
+                try:
+                    wk.wait(3000)
+                except Exception:
+                    pass
+        event.accept()
+
     # ---------------------------------------------------------- ① Model
     def _tab_model(self):
         w = QWidget(); lay = QHBoxLayout(w)
@@ -468,6 +512,9 @@ class MainWindow(QMainWindow):
         """모델 전환 시 이전 모델의 해석·최적화 결과를 모두 비운다 —
         다른 aedt를 열었는데 직전 모델 결과가 남는 것 방지."""
         self.candidates = []
+        self.last_solve = None          # 직전 모델의 Solve 결과 비우기
+        self.last_responses = None      # 직전 모델의 부하 스윕 응답 비우기
+        self._dataset_warned = None     # 전류-불일치 경고 1회 플래그 리셋
         self._active_round = 0
         if hasattr(self, "btn_active"):
             self.btn_active.setText(
@@ -700,12 +747,21 @@ class MainWindow(QMainWindow):
             try:
                 L = float(self.tbl_obj.item(i, 3).text())
                 U = float(self.tbl_obj.item(i, 5).text())
-                if typ == "target":
-                    spec[k] = (typ, L, float(self.tbl_obj.item(i, 4).text()), U)
-                else:
-                    spec[k] = (typ, L, U)
+                T = (float(self.tbl_obj.item(i, 4).text())
+                     if typ == "target" else None)
             except (TypeError, ValueError):
                 raise ValueError(f"Objective 행 '{k}'의 L/T/U 값이 잘못됨")
+            if not (L < U):                      # 경계 뒤바뀜·동일 → 만족도 무의미
+                raise ValueError(
+                    f"Objective 행 '{k}': 하한 L({L:g}) < 상한 U({U:g}) 이어야 함")
+            if typ == "target":
+                if not (L < T < U):       # d_target가 (T-L),(U-T)로 나눔 → 엄격
+                    raise ValueError(
+                        f"Objective 행 '{k}': 목표 T({T:g})는 "
+                        f"L({L:g}) < T < U({U:g}) 를 만족해야 함")
+                spec[k] = (typ, L, T, U)
+            else:
+                spec[k] = (typ, L, U)
         if not spec:
             raise ValueError("체크된 목표 특성이 없음")
         return spec
@@ -854,6 +910,7 @@ class MainWindow(QMainWindow):
         b2 = QPushButton("▶ 부하 해석 (입력 전류·MTPA)")
         b2.setObjectName("primary")
         b2.clicked.connect(lambda: self.run_solve(load=True))
+        self.btn_solve_noload, self.btn_solve_load = b1, b2
         left.addWidget(b1); left.addWidget(b2)
 
         grp = QGroupBox("부하 스윕 — 효율·토크리플·손실 (전기 1주기)")
@@ -885,8 +942,11 @@ class MainWindow(QMainWindow):
             "불변). aedt 값으로 자동 설정, 없으면 1.0. Maxwell이 0.97을 썼다면 "
             "0.97 입력. 무부하·부하·스윕·DOE 모든 해석에 반영됩니다.")
         self.cb_ibase = QComboBox()
-        self.cb_ibase.addItems(["상전류 (권선)", "선간전류 · Y결선",
-                                "선간전류 · Δ결선"])
+        # 라벨 변경에 흔들리지 않도록 안정적인 식별자(phase/Y/delta)를 데이터로 부여
+        for _lbl, _key in (("상전류 (권선)", "phase"),
+                           ("선간전류 · Y결선", "Y"),
+                           ("선간전류 · Δ결선", "delta")):
+            self.cb_ibase.addItem(_lbl, _key)
         for col, (lbl, w_) in enumerate(
                 [("전류 [Arms]", self.sp_irms),
                  ("전류 기준 (해석은 상전류)", self.cb_ibase),
@@ -913,6 +973,7 @@ class MainWindow(QMainWindow):
         b3 = QPushButton("▶ 부하 스윕 실행 (γ 캘리브레이션 포함 — 수 분 소요)")
         b3.setObjectName("go")
         b3.clicked.connect(self.run_load_sweep)
+        self.btn_sweep = b3
         g.addWidget(b3, 5, 0, 1, 6)
         left.addWidget(grp)
         self.log_solve = QPlainTextEdit(); self.log_solve.setReadOnly(True)
@@ -929,7 +990,11 @@ class MainWindow(QMainWindow):
         if self.geo is None:
             self.log_solve.appendPlainText("⚠ 먼저 Model 탭에서 aedt를 여세요")
             return
-        model, style, raw = self.model, self.style, self.current_raw()
+        # 워커가 실행되는 동안 GUI에서 적층계수·턴수를 바꿔도(=_apply_stack/
+        # _apply_turns가 self.model의 중첩 dict를 변형) 워커 스냅샷이 오염되지
+        # 않도록 깊은 복사를 넘긴다.
+        model, style, raw = copy.deepcopy(self.model), self.style, \
+            self.current_raw()
         irms_in, i_note = self._phase_current()
         if load and i_note:
             self.log_solve.appendPlainText(i_note)
@@ -984,7 +1049,10 @@ class MainWindow(QMainWindow):
                     "비교·검증은 아래 '부하 스윕'의 T_avg(가상일 1주기 평균)을 쓰세요.")
             return s, res, met
 
-        self._spawn(job, self.log_solve.appendPlainText, self._solve_done)
+        self._spawn(job, self.log_solve.appendPlainText, self._solve_done,
+                    busy_btns=[self.btn_solve_load if load
+                               else self.btn_solve_noload],
+                    notify="부하 해석 완료" if load else "무부하 해석 완료")
 
     def _update_iconv(self):
         """전류 입력/기준 변경 시 해석에 쓰일 상전류를 즉시 표시."""
@@ -996,11 +1064,11 @@ class MainWindow(QMainWindow):
     def _phase_current(self) -> tuple:
         """전류 입력 + 기준 콤보 → (상전류 Arms, 환산 설명)."""
         I = float(self.sp_irms.value())
-        mode = self.cb_ibase.currentText()
-        if "Δ" in mode:
+        mode = self.cb_ibase.currentData()       # 라벨이 아닌 안정 식별자로 판정
+        if mode == "delta":
             return I / math.sqrt(3.0), \
                 f"선간 {I:.2f}A (Δ) → 상전류 {I/math.sqrt(3.0):.2f}A"
-        if "Y" in mode:
+        if mode == "Y":
             return I, f"선간 {I:.2f}A (Y) = 상전류 {I:.2f}A"
         return I, ""
 
@@ -1008,7 +1076,9 @@ class MainWindow(QMainWindow):
         if self.geo is None:
             self.log_solve.appendPlainText("⚠ 먼저 Model 탭에서 aedt를 여세요")
             return
-        model, style, raw = self.model, self.style, self.current_raw()
+        # 실행 중 적층계수·턴수 변경이 워커 모델을 오염시키지 않도록 깊은 복사
+        model, style, raw = copy.deepcopy(self.model), self.style, \
+            self.current_raw()
         rpm = float(self.sp_rpm.value())
         irms, i_note = self._phase_current()
         if i_note:
@@ -1070,7 +1140,8 @@ class MainWindow(QMainWindow):
                 f"(자석 와류손·기계손 미포함)")
             return r
 
-        self._spawn(job, self.log_solve.appendPlainText, self._sweep_done)
+        self._spawn(job, self.log_solve.appendPlainText, self._sweep_done,
+                    busy_btns=[self.btn_sweep], notify="부하 스윕 완료")
 
     def _sweep_done(self, r):
         self.last_responses = r
@@ -1216,7 +1287,8 @@ class MainWindow(QMainWindow):
         if self.aedt_path is None:
             self.log_opt.appendPlainText("⚠ 먼저 Model 탭에서 aedt를 여세요")
             return
-        model, style = self.model, self.style
+        # 실행 중 적층계수·턴수 변경이 워커 모델을 오염시키지 않도록 깊은 복사
+        model, style = copy.deepcopy(self.model), self.style
         n = int(self.sp_ndoe.value())
         try:
             user_bounds = self._bounds_from_table()      # 사용자 설계변수 범위
@@ -1259,9 +1331,10 @@ class MainWindow(QMainWindow):
             delta = calibrate_delta(model, style, I_rms=irms,
                                     steel_name=steel, magnet_name=mag)
             log(f"δ* = {delta:.1f}°e")
-            json.dump({"I_rms": irms, "delta_e_deg": delta, "bounds": bounds,
-                       "design": model.get("design_name")},
-                      open(meta_path, "w", encoding="utf-8"))
+            with open(meta_path, "w", encoding="utf-8") as _mf:
+                json.dump({"I_rms": irms, "delta_e_deg": delta,
+                           "bounds": bounds,
+                           "design": model.get("design_name")}, _mf)
 
             keys = list(bounds)
             lo = np.array([bounds[k][0] for k in keys])
@@ -1342,7 +1415,8 @@ class MainWindow(QMainWindow):
         dataset, _ = self._dataset_paths()
         meta_path = dataset[:-6] + ".meta.json"
         if os.path.exists(meta_path):
-            mt = json.load(open(meta_path, encoding="utf-8"))
+            with open(meta_path, encoding="utf-8") as _mf:
+                mt = json.load(_mf)
             return ({k: tuple(b) for k, b in mt["bounds"].items()},
                     float(mt["delta_e_deg"]), float(mt["I_rms"]))
         from motoropt.doe import BOUNDS, DELTA_E_DEG
@@ -1466,7 +1540,8 @@ class MainWindow(QMainWindow):
         if self.aedt_path is None:
             self.log_opt.appendPlainText("⚠ 먼저 Model 탭에서 aedt를 여세요")
             return
-        model, style = self.model, self.style
+        # 실행 중 적층계수·턴수 변경이 워커 모델을 오염시키지 않도록 깊은 복사
+        model, style = copy.deepcopy(self.model), self.style
         try:
             spec = self._spec_from_table()
         except ValueError as e:
@@ -1800,7 +1875,13 @@ class MainWindow(QMainWindow):
 
         실행 위치(cwd)와 무관해야 하고 ① 모델이 다르면 설계명으로,
         ② 운전점이 다르면 상전류로 파일을 분리한다 — 다른 aedt나 다른
-        전류(피크/정격)의 결과가 절대 섞이지 않도록. 400W는 레거시 유지."""
+        전류(피크/정격)의 결과가 절대 섞이지 않도록. 400W는 레거시 유지.
+
+        ⚠ 파일 태그는 LIVE 전류 위젯(_phase_current)으로 만든다. 따라서
+        Solve 탭에서 전류·Y/Δ를 바꾸면 이 경로가 기존 데이터셋과 어긋나
+        '데이터 없음'으로 보일 수 있다. 그런 경우(라이브 경로엔 데이터가
+        없는데 같은 모델의 다른 전류 데이터셋이 디스크에 존재) 조용히
+        넘어가지 않고 로그로 크게 경고한다."""
         design = (self.model or {}).get("design_name", "") or "unknown"
         if design == self._DESIGN_400W:
             return (os.path.join(_ROOT, "doe_results.jsonl"),
@@ -1808,8 +1889,42 @@ class MainWindow(QMainWindow):
         tag = re.sub(r"[^\w]+", "_", design).strip("_")
         iph = self._phase_current()[0] if hasattr(self, "sp_irms") else 0.0
         cur = f"_{iph:.1f}A" if iph > 0 else ""
-        return (os.path.join(_ROOT, f"doe_{tag}{cur}.jsonl"),
-                os.path.join(_ROOT, f"surrogate_{tag}{cur}.joblib"))
+        dataset = os.path.join(_ROOT, f"doe_{tag}{cur}.jsonl")
+        surro = os.path.join(_ROOT, f"surrogate_{tag}{cur}.joblib")
+        # 라이브 전류 경로에 데이터가 없는데 같은 모델의 '다른 전류' 데이터셋이
+        # 디스크에 있으면, 사용자가 전류/결선을 바꿔 엉뚱한 파일을 가리키는
+        # 상황이다 — 조용히 '데이터 없음'이라 하지 말고 한 번 크게 경고한다.
+        if not os.path.exists(dataset):
+            others = sorted(glob.glob(os.path.join(_ROOT, f"doe_{tag}_*.jsonl")))
+            others = [p for p in others if p != dataset]
+            if others and getattr(self, "_dataset_warned", None) != dataset:
+                self._dataset_warned = dataset
+                names = ", ".join(os.path.basename(p) for p in others)
+                self._dataset_mismatch_warn(iph, names)
+        return (dataset, surro)
+
+    def _dataset_mismatch_warn(self, iph, names):
+        """현재 운전전류가 기존 DOE 데이터셋과 어긋남을 로그로 알린다."""
+        msg = (f"⚠ 현재 운전 상전류 {iph:.1f}A 에 해당하는 DOE 데이터셋이 "
+               f"없습니다. 같은 모델의 다른 전류 데이터셋은 존재: {names}. "
+               "Solve 탭의 전류/Y·Δ 설정을 그 데이터셋의 전류로 맞추거나, "
+               "이 전류로 새 DOE를 생성하세요.")
+        for log in (getattr(self, "log_opt", None),
+                    getattr(self, "log_solve", None)):
+            if log is not None:
+                log.appendPlainText(msg)
+                break
+
+    def _all_run_btns(self):
+        """모든 해석 실행 트리거 버튼(현재 존재하는 것만). 워커가 하나라도
+        돌면 이들 전부를 비활성화해 동시 FEM 실행·공유상태 충돌을 막는다."""
+        return [b for b in (getattr(self, "btn_solve_noload", None),
+                            getattr(self, "btn_solve_load", None),
+                            getattr(self, "btn_sweep", None),
+                            getattr(self, "btn_doe", None),
+                            getattr(self, "btn_active", None),
+                            getattr(self, "btn_sac", None))
+                if b is not None]
 
     def _spawn(self, job, log_slot, done_slot, busy_btns=None,
                geom_slot=None, notify=None):
@@ -1820,11 +1935,19 @@ class MainWindow(QMainWindow):
         if geom_slot is not None:
             wk.geom.connect(geom_slot)
         self._cur_geom_emit = wk.geom.emit       # 잡이 형상을 보낼 통로
-        btns = list(busy_btns or [])
-        labels = [(b, b.text()) for b in btns]
-        for b in btns:
+        # 어떤 워커가 돌든 모든 실행 트리거를 막아 동시 해석을 직렬화한다.
+        # 라벨을 '⏳ 실행 중…'으로 바꾸는 건 호출자가 지정한 busy_btns만.
+        relabel = list(busy_btns or [])
+        all_btns = list(self._all_run_btns())
+        for b in relabel:
+            if b not in all_btns:
+                all_btns.append(b)
+        labels = [(b, b.text()) for b in all_btns]
+        relabel_set = set(map(id, relabel))
+        for b in all_btns:
             b.setEnabled(False)
-            b.setText("⏳ 실행 중…")
+            if id(b) in relabel_set:
+                b.setText("⏳ 실행 중…")
 
         def _finish(ok):
             for b, t in labels:
@@ -1836,9 +1959,18 @@ class MainWindow(QMainWindow):
                 QApplication.beep()
             except Exception:
                 pass
+
+        def _remove():                           # 이미 빠졌으면(종료 정리) 무시
+            try:
+                self._workers.remove(wk)
+            except ValueError:
+                pass
         wk.done.connect(lambda *_: _finish(True))
         wk.failed.connect(lambda *_: _finish(False))
-        wk.finished.connect(lambda: self._workers.remove(wk))
+        wk.finished.connect(_remove)
+        # 백스톱: done/failed 없이 스레드가 끝나도(예외적 종료) 버튼이 영구
+        # 비활성으로 남지 않게 — _finish는 멱등이라 중복 호출 무해.
+        wk.finished.connect(lambda *_: _finish(False))
         self._workers.append(wk)
         wk.start()
 
@@ -1846,13 +1978,28 @@ class MainWindow(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setStyleSheet(DARK_QSS)               # 다크 엔지니어링 테마
-    # PyQt6는 미처리 예외 시 qFatal(abort) — 다이얼로그로 대체해 앱 유지
+    # PyQt6는 미처리 예외 시 qFatal(abort) — 다이얼로그로 대체해 앱 유지.
+    # 전체 트레이스백은 항상 stderr + 로그파일에 남겨, 핸들러가 조용히
+    # 오류를 삼키지 않게 한다.
     def hook(tp, val, tb):
-        traceback.print_exception(tp, val, tb)
+        traceback.print_exception(tp, val, tb)      # 항상 stderr로
+        log_path = None
         try:
-            _error_dialog(None, "내부 오류", val)
+            log_dir = os.path.join(_ROOT, "logs")
+            os.makedirs(log_dir, exist_ok=True)
+            log_path = os.path.join(
+                log_dir, f"error_{time.strftime('%Y%m%d_%H%M%S')}.log")
+            with open(log_path, "w", encoding="utf-8") as f:
+                f.write("".join(traceback.format_exception(tp, val, tb)))
         except Exception:
-            pass
+            # 로그 기록 자체가 실패해도 조용히 넘어가지 말고 stderr로 알림
+            log_path = None
+            traceback.print_exc()
+        try:
+            _error_dialog(None, "내부 오류", val, log_path=log_path)
+        except Exception:
+            # 다이얼로그까지 실패하면 최소한 stderr로 남긴다(앱은 유지)
+            traceback.print_exc()
     sys.excepthook = hook
     win = MainWindow()
     if len(sys.argv) > 1 and sys.argv[1].endswith(".aedt"):
